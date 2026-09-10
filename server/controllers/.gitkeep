@@ -1,0 +1,2 @@
+// Controllers handle the business logic for each route
+// Example: exports.getExpenses = async (req, res) => { ... }

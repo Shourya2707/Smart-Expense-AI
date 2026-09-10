@@ -1,0 +1,2 @@
+// Middleware functions (auth, error handling, validation, etc.)
+// Example: module.exports = (req, res, next) => { ... }
