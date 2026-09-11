@@ -4,200 +4,95 @@ import { formatInputDate } from "../utils/formatters";
 
 const SOURCES = ["Salary", "Freelancing", "Business", "Investments", "Gift", "Other"];
 
+const FIELD = ({ label, required, children }) => (
+  <div>
+    <label className="label">{label}{required && <span style={{ color: "var(--fin-red)", marginLeft: 2 }}>*</span>}</label>
+    {children}
+  </div>
+);
+
 const IncomeModal = ({ isOpen, onClose, onSave, incomeToEdit }) => {
-  const [formData, setFormData] = useState({
-    amount: "",
-    source: "Salary",
-    date: formatInputDate(),
-  });
+  const [form, setForm] = useState({ amount: "", source: "Salary", date: formatInputDate() });
   const [error, setError] = useState("");
-  const firstInputRef = useRef(null);
+  const [saving, setSaving] = useState(false);
+  const firstRef = useRef(null);
 
   useEffect(() => {
-    if (isOpen) {
-      if (incomeToEdit) {
-        setFormData({
-          amount: incomeToEdit.amount,
-          source: incomeToEdit.source,
-          date: formatInputDate(incomeToEdit.date),
-        });
-      } else {
-        setFormData({ amount: "", source: "Salary", date: formatInputDate() });
-      }
-      setError("");
-      setTimeout(() => firstInputRef.current?.focus(), 50);
-    }
-  }, [incomeToEdit, isOpen]);
+    if (!isOpen) return;
+    setForm(incomeToEdit
+      ? { amount: incomeToEdit.amount, source: incomeToEdit.source, date: formatInputDate(incomeToEdit.date) }
+      : { amount: "", source: "Salary", date: formatInputDate() });
+    setError("");
+    setTimeout(() => firstRef.current?.focus(), 60);
+  }, [isOpen, incomeToEdit]);
 
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === "Escape" && isOpen) onClose();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    const fn = (e) => { if (e.key === "Escape" && isOpen) onClose(); };
+    window.addEventListener("keydown", fn);
+    return () => window.removeEventListener("keydown", fn);
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-    if (error) setError("");
+  const set = (key) => (e) => {
+    setForm((p) => ({ ...p, [key]: e.target.value }));
+    setError("");
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.amount || !formData.source || !formData.date) {
-      setError("Please fill out all required fields.");
-      return;
+    const parsed = parseFloat(form.amount);
+    if (!form.amount || isNaN(parsed) || parsed <= 0) { setError("Enter an amount greater than 0."); return; }
+    setSaving(true);
+    try {
+      await onSave({ ...form, amount: parsed });
+    } catch (saveError) {
+      setError(saveError.response?.data?.message || "Could not save this income.");
+    } finally {
+      setSaving(false);
     }
-    const parsed = parseFloat(formData.amount);
-    if (isNaN(parsed) || parsed <= 0) {
-      setError("Please enter an amount greater than 0.");
-      return;
-    }
-    onSave({ ...formData, amount: parsed });
   };
 
   return (
-    <div
-      className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 transition-opacity duration-200"
-      style={{ background: "rgba(0,0,0,0.3)", backdropFilter: "blur(6px)" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="income-modal-title"
-    >
-      <div
-        className="modal-surface w-full max-w-md rounded-2xl p-6 sm:p-7 animate-modal relative"
-        style={{
-          background: "#ffffff",
-          border: "1px solid rgba(0,0,0,0.08)",
-          boxShadow: "0 24px 64px rgba(0,0,0,0.12), 0 4px 16px rgba(0,0,0,0.06)",
-        }}
-      >
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} role="dialog" aria-modal="true" aria-labelledby="inc-modal-title">
+      <div className="modal-panel" style={{ padding: "24px 26px" }}>
         {/* Header */}
-        <div
-          className="flex items-center justify-between pb-5 mb-5"
-          style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}
-        >
-          <div className="flex items-center gap-3">
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center"
-              style={{ background: "#f0fdf4", color: "#059669" }}
-            >
-              <Wallet size={18} />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, paddingBottom: 16, borderBottom: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 9, background: "var(--fin-green-bg)", color: "var(--fin-green)", display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--fin-green-border)" }}>
+              <Wallet size={15} />
             </div>
             <div>
-              <h2
-                id="income-modal-title"
-                className="text-[16px] font-bold"
-                style={{ color: "#1d1d1f", letterSpacing: "-0.02em" }}
-              >
-                {incomeToEdit ? "Edit Income" : "Record Income"}
+              <h2 id="inc-modal-title" style={{ fontSize: 14.5, fontWeight: 700, color: "var(--ink)", lineHeight: 1.2 }}>
+                {incomeToEdit ? "Edit Income" : "Add Income"}
               </h2>
-              <p className="text-xs mt-0.5" style={{ color: "#6e6e73" }}>
-                Log cash inflow and earnings
-              </p>
+              <p style={{ fontSize: 11.5, color: "var(--ink-4)", marginTop: 1 }}>Log a deposit or earning</p>
             </div>
           </div>
-
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-xl active-press cursor-pointer"
-            style={{ color: "#aeaeb2" }}
-            onMouseEnter={e => (e.currentTarget.style.background = "rgba(0,0,0,0.05)")}
-            onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
-            title="Close"
-            aria-label="Close"
-          >
-            <X size={18} />
-          </button>
+          <button className="btn-icon" onClick={onClose} aria-label="Close"><X size={15} /></button>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {error && (
-            <div
-              className="p-3 rounded-xl text-sm font-medium"
-              style={{ background: "#fef2f2", border: "1px solid rgba(220,38,38,0.2)", color: "#dc2626" }}
-            >
-              {error}
-            </div>
-          )}
+        {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>}
 
-          {/* Amount */}
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-widest mb-1.5" style={{ color: "#aeaeb2" }}>
-              Amount (₹) <span style={{ color: "#059669" }}>*</span>
-            </label>
-            <input
-              ref={firstInputRef}
-              type="number"
-              step="0.01"
-              name="amount"
-              value={formData.amount}
-              onChange={handleChange}
-              placeholder="0.00"
-              className="w-full glass-input px-4 py-3 rounded-xl text-base font-semibold font-mono"
-              style={{ color: "#1d1d1f" }}
-              required
-            />
-          </div>
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <FIELD label="Amount (₹)" required>
+            <input ref={firstRef} type="number" step="0.01" min="0.01" className="input" style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }} value={form.amount} onChange={set("amount")} placeholder="0.00" required />
+          </FIELD>
 
-          {/* Source */}
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-widest mb-1.5" style={{ color: "#aeaeb2" }}>
-              Income Source <span style={{ color: "#059669" }}>*</span>
-            </label>
-            <select
-              name="source"
-              value={formData.source}
-              onChange={handleChange}
-              className="w-full glass-input px-4 py-3 rounded-xl text-sm cursor-pointer"
-              style={{ color: "#1d1d1f" }}
-            >
-              {SOURCES.map((src) => (
-                <option key={src} value={src}>{src}</option>
-              ))}
+          <FIELD label="Income Source" required>
+            <select className="input" value={form.source} onChange={set("source")} style={{ cursor: "pointer" }}>
+              {SOURCES.map((s) => <option key={s}>{s}</option>)}
             </select>
-          </div>
+          </FIELD>
 
-          {/* Date */}
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-widest mb-1.5" style={{ color: "#aeaeb2" }}>
-              Date Received <span style={{ color: "#059669" }}>*</span>
-            </label>
-            <input
-              type="date"
-              name="date"
-              value={formData.date}
-              onChange={handleChange}
-              className="w-full glass-input px-4 py-3 rounded-xl text-sm"
-              style={{ color: "#1d1d1f" }}
-              required
-            />
-          </div>
+          <FIELD label="Date" required>
+            <input type="date" className="input" style={{ fontFamily: "'JetBrains Mono', monospace" }} value={form.date} onChange={set("date")} required />
+          </FIELD>
 
-          {/* Actions */}
-          <div className="pt-3 flex gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="modal-cancel flex-1 py-3 px-4 font-semibold text-sm rounded-xl active-press cursor-pointer"
-              style={{ background: "#f5f5f7", color: "#6e6e73", border: "1px solid rgba(0,0,0,0.08)" }}
-              onMouseEnter={e => (e.currentTarget.style.background = "#ebebeb")}
-              onMouseLeave={e => (e.currentTarget.style.background = "#f5f5f7")}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="modal-income flex-1 py-3 px-4 text-white font-semibold text-sm rounded-xl shadow-sm shadow-emerald-500/20 active-press cursor-pointer"
-              style={{ background: "#059669" }}
-              onMouseEnter={e => (e.currentTarget.style.background = "#047857")}
-              onMouseLeave={e => (e.currentTarget.style.background = "#059669")}
-            >
-              {incomeToEdit ? "Update Income" : "Save Income"}
+          <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+            <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
+              {saving ? "Saving…" : incomeToEdit ? "Update" : "Save Income"}
             </button>
           </div>
         </form>

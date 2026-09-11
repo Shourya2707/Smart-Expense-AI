@@ -1,34 +1,21 @@
-const mongoose = require("mongoose");
+const { db, expense } = require("../config/db");
 
-const ExpenseSchema = new mongoose.Schema(
-  {
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      required: true,
-      ref: "User",
-    },
-    amount: {
-      type: Number,
-      required: [true, "Amount is required"],
-      min: [0.01, "Amount must be greater than 0"],
-    },
-    category: {
-      type: String,
-      required: [true, "Category is required"],
-      enum: ["Food", "Travel", "Shopping", "Bills", "Entertainment", "Health", "Education", "Others"],
-    },
-    description: {
-      type: String,
-      required: [true, "Description is required"],
-      trim: true,
-    },
-    date: {
-      type: Date,
-      required: [true, "Date is required"],
-      default: Date.now,
-    },
+module.exports = {
+  list: async (userId) => db.prepare("SELECT * FROM expenses WHERE user_id = ? ORDER BY date DESC, id DESC").all(userId).map(expense),
+  create: async (data) => {
+    const result = db.prepare("INSERT INTO expenses (user_id, amount, category, description, date) VALUES (?, ?, ?, ?, ?)")
+      .run(data.userId, data.amount, data.category, data.description, data.date);
+    return expense(db.prepare("SELECT * FROM expenses WHERE id = ?").get(result.lastInsertRowid));
   },
-  { timestamps: true }
-);
-
-module.exports = mongoose.model("Expense", ExpenseSchema);
+  findById: async (id) => expense(db.prepare("SELECT * FROM expenses WHERE id = ?").get(id)),
+  update: async (id, fields) => {
+    const keys = Object.keys(fields);
+    if (keys.length) {
+      // Column names come from the controller whitelist, never from user input directly.
+      const assigns = keys.map((key) => `${key === "userId" ? "user_id" : key} = @${key}`).join(", ");
+      db.prepare(`UPDATE expenses SET ${assigns} WHERE id = @id`).run({ ...fields, id });
+    }
+    return expense(db.prepare("SELECT * FROM expenses WHERE id = ?").get(id));
+  },
+  remove: (id) => db.prepare("DELETE FROM expenses WHERE id = ?").run(id),
+};

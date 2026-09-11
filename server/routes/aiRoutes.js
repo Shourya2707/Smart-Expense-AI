@@ -1,45 +1,42 @@
 const express = require("express");
 const multer = require("multer");
-const { getInsights, getGeminiInsights, scanReceipt } = require("../controllers/aiController");
+const { chat, chatHistory, chatReset, getInsights, scanReceipt } = require("../controllers/aiController");
 const { protect } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
-// Multer config for receipt uploads — 5MB max, memory storage
+router.use(protect);
+
+// Conversational assistant
+router.post("/chat", chat);
+router.get("/chat/history", chatHistory);
+router.post("/chat/reset", chatReset);
+
+// Insights
+router.get("/insights", getInsights);
+
+// Receipt upload — 5MB max, memory storage. Groq vision accepts jpeg/png/webp only.
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowed = ["image/jpeg", "image/png", "image/webp", "image/heic"];
-    if (allowed.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error("Invalid file type. Only JPEG, PNG, WebP, and HEIC images are allowed."), false);
-    }
+    const allowed = ["image/jpeg", "image/png", "image/webp"];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error("Invalid file type. Only JPEG, PNG, and WebP images are allowed."), false);
   },
 });
 
-// Middleware to handle multer file upload errors cleanly
 const handleUpload = (req, res, next) => {
-  const uploadSingle = upload.single("receipt");
-  uploadSingle(req, res, (err) => {
+  upload.single("receipt")(req, res, (err) => {
     if (err instanceof multer.MulterError) {
-      if (err.code === "LIMIT_FILE_SIZE") {
-        return res.status(400).json({
-          success: false,
-          message: "File is too large. Maximum supported image size is 5MB.",
-        });
-      }
-      return res.status(400).json({ success: false, message: err.message });
-    } else if (err) {
-      return res.status(400).json({ success: false, message: err.message });
+      const message = err.code === "LIMIT_FILE_SIZE" ? "File is too large. Maximum supported image size is 5MB." : err.message;
+      return res.status(400).json({ success: false, message });
     }
+    if (err) return res.status(400).json({ success: false, message: err.message });
     next();
   });
 };
 
-router.get("/insights", protect, getInsights);
-router.get("/gemini-insights", protect, getGeminiInsights);
-router.post("/scan-receipt", protect, handleUpload, scanReceipt);
+router.post("/scan-receipt", handleUpload, scanReceipt);
 
 module.exports = router;

@@ -1,41 +1,48 @@
 const express = require("express");
 const cors = require("cors");
-const dotenv = require("dotenv");
+const path = require("path");
+const fs = require("fs");
+const { env } = require("./config/env"); // loads + validates dotenv on first require
 const { errorHandler, notFound } = require("./middleware/errorMiddleware");
-
-// Load environment variables
-dotenv.config();
+const { requestTelemetry } = require("./middleware/telemetryMiddleware");
 
 const app = express();
 
 // --------------- Middleware ---------------
+// Production: only the configured origin may call the API with credentials.
+// Development (no CLIENT_URL): reflect the requesting origin so Vite HMR works.
 app.use(cors({
-  origin: process.env.CLIENT_URL || true,
+  origin: env.isProd
+    ? (env.clientUrl ? env.clientUrl.split(",").map((s) => s.trim()) : false)
+    : (env.clientUrl ? env.clientUrl.split(",").map((s) => s.trim()) : true),
   credentials: true,
 }));
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
+app.use(requestTelemetry);
+app.use("/api", (req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  next();
+});
 
 // --------------- Routes ---------------
 app.get("/", (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: "SmartExpense AI Backend Running",
-  });
+  res.status(200).json({ success: true, message: "SmartExpense AI Backend Running" });
 });
 
-// API Routes
-const authRoutes = require("./routes/authRoutes");
-const expenseRoutes = require("./routes/expenseRoutes");
-const incomeRoutes = require("./routes/incomeRoutes");
-const analyticsRoutes = require("./routes/analyticsRoutes");
-const aiRoutes = require("./routes/aiRoutes");
+app.use("/api/auth", require("./routes/authRoutes"));
+app.use("/api/expenses", require("./routes/expenseRoutes"));
+app.use("/api/income", require("./routes/incomeRoutes"));
+app.use("/api/analytics", require("./routes/analyticsRoutes"));
+app.use("/api/ai", require("./routes/aiRoutes"));
+app.use("/api/admin", require("./routes/adminRoutes"));
 
-app.use("/api/auth", authRoutes);
-app.use("/api/expenses", expenseRoutes);
-app.use("/api/income", incomeRoutes);
-app.use("/api/analytics", analyticsRoutes);
-app.use("/api/ai", aiRoutes);
+// Railway can serve the built Vite app from the same process.
+const clientDist = path.join(__dirname, "..", "client", "dist");
+if (fs.existsSync(clientDist)) {
+  app.use(express.static(clientDist));
+  app.get("/{*splat}", (req, res, next) => (req.path.startsWith("/api/") ? next() : res.sendFile(path.join(clientDist, "index.html"))));
+}
 
 // --------------- Error Handling ---------------
 app.use(notFound);

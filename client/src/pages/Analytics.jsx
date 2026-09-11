@@ -1,285 +1,354 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, PieChart, Pie, Cell,
-} from "recharts";
-import { Wallet, TrendingUp, TrendingDown, Activity, Award, PieChart as PieIcon, BarChart3 } from "lucide-react";
+  Sparkles,
+  TrendingUp,
+  TrendingDown,
+  Wallet,
+  Activity,
+  PieChart as PieIcon,
+  BarChart3,
+  LineChart as LineIcon,
+  RefreshCw,
+} from "lucide-react";
 import API from "../services/api";
-import SummaryCard from "../components/SummaryCard";
+import { useToast } from "../context/ToastContext";
 import { formatCurrency } from "../utils/formatters";
+import { onDataChanged } from "../utils/dataEvents";
+import SummaryCard from "../components/SummaryCard";
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  PieChart,
+  Pie,
+  Cell,
+  AreaChart,
+  Area,
+  Legend,
+} from "recharts";
 
-// Light-friendly chart palette
-const CHART_COLORS = [
-  "#4f46e5", "#0ea5e9", "#059669", "#d97706",
-  "#dc2626", "#9333ea", "#db2777", "#6b7280",
+const FIN_PALETTE = [
+  "#0f172a", // slate-900
+  "#3b82f6", // blue-500
+  "#10b981", // emerald-500
+  "#f59e0b", // amber-500
+  "#8b5cf6", // violet-500
+  "#ec4899", // pink-500
+  "#06b6d4", // cyan-500
+  "#64748b", // slate-500
 ];
 
-const TOOLTIP_STYLE = {
-  backgroundColor: "#ffffff",
-  borderColor: "rgba(0,0,0,0.08)",
-  borderRadius: "12px",
-  boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
-  fontSize: "12px",
-  color: "#1d1d1f",
-};
-
 const Analytics = () => {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const toast = useToast();
+  const [, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [data, setData] = useState({
+    totalIncome: 0,
+    totalExpenses: 0,
+    currentBalance: 0,
+    totalTransactions: 0,
+    categoryWiseExpense: [],
+    monthlyIncomeExpense: [],
+    highestExpenseCategory: null,
+    highestIncomeSource: null,
+  });
+  const [insights, setInsights] = useState([]);
+
+  const fetchAnalytics = useCallback(async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
+    else setRefreshing(true);
+
+    try {
+      const [analyticsRes, insightsRes] = await Promise.allSettled([
+        API.get("/api/analytics"),
+        API.get("/api/ai/insights"),
+      ]);
+
+      if (analyticsRes.status === "fulfilled" && analyticsRes.value.data.success) {
+        setData(analyticsRes.value.data.data);
+      }
+      if (insightsRes.status === "fulfilled" && insightsRes.value.data.success) {
+        setInsights(insightsRes.value.data.data || []);
+      }
+    } catch {
+      toast.error("Failed to load analytics engine.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [toast]);
 
   useEffect(() => {
-    const fetchAnalytics = async () => {
-      try {
-        const response = await API.get("/api/analytics");
-        if (response.data.success) setData(response.data.data);
-      } catch (error) {
-        console.error("Failed to fetch analytics:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchAnalytics();
-  }, []);
+  }, [fetchAnalytics]);
 
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
-        <div className="w-7 h-7 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-sm font-medium" style={{ color: "#aeaeb2" }}>
-          Generating financial analytics...
-        </p>
-      </div>
-    );
-  }
+  // The AI assistant (and other surfaces) can mutate data — refresh silently.
+  useEffect(() => onDataChanged(() => fetchAnalytics(true)), [fetchAnalytics]);
 
-  if (!data || data.totalTransactions === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center max-w-sm mx-auto p-6 animate-slide-up">
-        <div
-          className="w-16 h-16 rounded-2xl flex items-center justify-center mb-5"
-          style={{ background: "#eef2ff", color: "#4f46e5" }}
-        >
-          <Activity size={28} />
-        </div>
-        <h2 className="text-xl font-black mb-2" style={{ color: "#1d1d1f", letterSpacing: "-0.025em" }}>
-          No financial records yet
-        </h2>
-        <p className="text-sm leading-relaxed" style={{ color: "#6e6e73" }}>
-          Add your first income stream or expense to unlock visual breakdowns and monthly trend reports.
-        </p>
-      </div>
-    );
-  }
-
-  const {
-    totalIncome, totalExpenses, currentBalance, totalTransactions,
-    categoryWiseExpense, monthlyIncomeExpense, highestExpenseCategory, highestIncomeSource,
-  } = data;
-
-  const numMonths = monthlyIncomeExpense.length || 1;
-  const avgMonthlyIncome = totalIncome / numMonths;
-  const avgMonthlyExpense = totalExpenses / numMonths;
-
-  const summaryData = [
-    {
-      title: "Current Balance",
-      amount: formatCurrency(currentBalance),
-      icon: <Wallet size={18} />,
-      colorClass: "bg-indigo-50 text-indigo-600 border-indigo-100",
-      trend: "Net Position",
-      trendType: "neutral",
-    },
-    {
-      title: "Total Inflow",
-      amount: formatCurrency(totalIncome),
-      icon: <TrendingUp size={18} />,
-      colorClass: "bg-emerald-50 text-emerald-600 border-emerald-100",
-      trend: "+Earned",
-      trendType: "positive",
-    },
-    {
-      title: "Total Outflow",
-      amount: formatCurrency(totalExpenses),
-      icon: <TrendingDown size={18} />,
-      colorClass: "bg-rose-50 text-rose-600 border-rose-100",
-      trend: "-Spent",
-      trendType: "negative",
-    },
-    {
-      title: "Logged Transactions",
-      amount: String(totalTransactions),
-      icon: <Activity size={18} />,
-      colorClass: "bg-amber-50 text-amber-600 border-amber-100",
-      trend: "Total Records",
-      trendType: "neutral",
-    },
-  ];
-
-  const legendStyle = { fontSize: "11px", color: "#6e6e73" };
+  // Derived trajectory for the AreaChart
+  const trajectoryData = (data.monthlyIncomeExpense || []).map((m) => {
+    const net = (m.income || 0) - (m.expense || 0);
+    return {
+      month: m.month,
+      netCashflow: net,
+      inflow: m.income || 0,
+      outflow: m.expense || 0,
+    };
+  });
 
   return (
-    <div className="app-page flex flex-col gap-6 max-w-7xl mx-auto pb-12 animate-slide-up">
+    <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="animate-fade-in">
       {/* Header */}
-      <div>
-        <h1
-          className="text-2xl sm:text-[28px] font-black flex items-center gap-2.5"
-          style={{ color: "#1d1d1f", letterSpacing: "-0.03em" }}
-        >
-          <BarChart3 size={24} style={{ color: "#4f46e5" }} />
-          Financial Analytics
-        </h1>
-        <p className="text-sm mt-0.5" style={{ color: "#6e6e73" }}>
-          Visual cashflow reports, budget distributions, and historical trends.
-        </p>
+      <div style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "flex-start",
+        flexWrap: "wrap",
+        gap: "16px",
+      }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <h1 style={{ fontSize: "24px", fontWeight: "700", letterSpacing: "-0.025em", color: "var(--ink)" }}>
+              Financial Analytics &amp; Reports
+            </h1>
+            <button
+              onClick={() => fetchAnalytics(true)}
+              className="btn-icon"
+              title="Refresh telemetry"
+              disabled={refreshing}
+            >
+              <RefreshCw size={14} className={refreshing ? "spinner" : ""} />
+            </button>
+          </div>
+          <p style={{ fontSize: "13.5px", color: "var(--ink-3)", marginTop: "2px" }}>
+            Deterministic cashflow modeling, category allocation, and intelligence
+          </p>
+        </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {summaryData.map((item, index) => (
-          <SummaryCard key={index} {...item} />
-        ))}
+      {/* Strategic Insights Banner */}
+      <div className="card" style={{ padding: "20px 22px", background: "var(--surface)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px" }}>
+          <div style={{
+            width: "26px",
+            height: "26px",
+            borderRadius: "7px",
+            background: "var(--bg-subtle)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "var(--ink)",
+          }}>
+            <Sparkles size={15} />
+          </div>
+          <h2 style={{ fontSize: "13.5px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--ink-2)" }}>
+            Financial Observations
+          </h2>
+        </div>
+
+        {insights.length > 0 ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "12px" }}>
+            {insights.map((item, idx) => (
+              <div key={idx} className="insight-card">
+                <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+                  <div className={
+                    item.type === "warning"
+                      ? "insight-dot-amber"
+                      : item.type === "success"
+                      ? "insight-dot-green"
+                      : "insight-dot-blue"
+                  } />
+                  <div>
+                    <h3 style={{ fontSize: "13.5px", fontWeight: "600", color: "var(--ink)", marginBottom: "3px" }}>
+                      {item.title}
+                    </h3>
+                    <p style={{ fontSize: "12.5px", color: "var(--ink-3)", lineHeight: 1.5 }}>
+                      {item.message}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p style={{ fontSize: "13px", color: "var(--ink-3)" }}>
+            Analysis model calibrated. Log further data points to trigger high-resolution variance warnings.
+          </p>
+        )}
       </div>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Bar Chart — Income vs Expenses */}
-        <div className="glass-card rounded-2xl p-6 flex flex-col">
-          <div className="mb-5">
-            <h2 className="text-[15px] font-bold" style={{ color: "#1d1d1f", letterSpacing: "-0.02em" }}>
-              Income vs Expenses
-            </h2>
-            <p className="text-xs mt-0.5" style={{ color: "#6e6e73" }}>Monthly cashflow comparison</p>
+      {/* Metrics Row */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+        gap: "16px",
+      }}>
+        <SummaryCard
+          title="Gross Inflow"
+          value={formatCurrency(data.totalIncome || 0)}
+          icon={TrendingUp}
+          iconColor="var(--fin-green)"
+          iconBg="var(--fin-green-bg)"
+          trend={data.highestIncomeSource ? `Top source: ${data.highestIncomeSource}` : "Total receipts"}
+          trendType="positive"
+        />
+        <SummaryCard
+          title="Gross Outflow"
+          value={formatCurrency(data.totalExpenses || 0)}
+          icon={TrendingDown}
+          iconColor="var(--fin-red)"
+          iconBg="var(--fin-red-bg)"
+          trend={data.highestExpenseCategory ? `Top sink: ${data.highestExpenseCategory}` : "Total spent"}
+          trendType="negative"
+        />
+        <SummaryCard
+          title="Net Liquidity"
+          value={formatCurrency(data.currentBalance || 0)}
+          icon={Wallet}
+          iconColor="var(--ink)"
+          iconBg="var(--bg-subtle)"
+          trend="Current reserve"
+          trendType={data.currentBalance >= 0 ? "positive" : "negative"}
+        />
+        <SummaryCard
+          title="Total Transactions"
+          value={String(data.totalTransactions || 0)}
+          icon={Activity}
+          iconColor="var(--ink-3)"
+          iconBg="var(--bg-subtle)"
+          trend="Ledger operations"
+          trendType="neutral"
+        />
+      </div>
+
+      {/* Dual Column: Comparative Bar Chart & Category Donut */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))", gap: "20px" }}>
+        {/* Comparative Monthly Cashflow */}
+        <div className="card" style={{ padding: "22px 20px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "18px" }}>
+            <BarChart3 size={16} style={{ color: "var(--ink-3)" }} />
+            <div>
+              <span className="section-label">Cash Inflow vs Outflow</span>
+              <h3 style={{ fontSize: "15px", fontWeight: "700", color: "var(--ink)" }}>Monthly Cashflow Delta</h3>
+            </div>
           </div>
 
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={monthlyIncomeExpense} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" vertical={false} />
-                <XAxis
-                  dataKey="month"
-                  stroke="transparent"
-                  tick={{ fill: "#aeaeb2", fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  stroke="transparent"
-                  tick={{ fill: "#aeaeb2", fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip
-                  contentStyle={TOOLTIP_STYLE}
-                  itemStyle={{ color: "#1d1d1f" }}
-                  formatter={(val) => formatCurrency(val)}
-                />
-                <Legend
-                  iconType="circle"
-                  wrapperStyle={{ paddingTop: "16px", ...legendStyle }}
-                />
-                <Bar dataKey="income" name="Income" fill="#4f46e5" radius={[5, 5, 0, 0]} maxBarSize={40} opacity={0.9} />
-                <Bar dataKey="expense" name="Expense" fill="#f43f5e" radius={[5, 5, 0, 0]} maxBarSize={40} opacity={0.8} />
-              </BarChart>
-            </ResponsiveContainer>
+          <div style={{ width: "100%", height: "280px" }}>
+            {data.monthlyIncomeExpense && data.monthlyIncomeExpense.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={data.monthlyIncomeExpense} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                  <XAxis dataKey="month" tick={{ fill: "var(--ink-3)", fontSize: 11 }} axisLine={{ stroke: "var(--border)" }} />
+                  <YAxis tick={{ fill: "var(--ink-3)", fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    cursor={{ fill: "rgba(15, 23, 42, 0.03)" }}
+                    contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px" }}
+                    formatter={(val) => [formatCurrency(val), ""]}
+                  />
+                  <Legend iconType="circle" wrapperStyle={{ paddingTop: "10px", fontSize: "12px" }} />
+                  <Bar dataKey="income" name="Inflow" fill="#16a34a" radius={[4, 4, 0, 0]} maxBarSize={28} />
+                  <Bar dataKey="expense" name="Outflow" fill="#dc2626" radius={[4, 4, 0, 0]} maxBarSize={28} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="empty-state" style={{ height: "100%", padding: 0 }}>
+                <span>No monthly cashflow data</span>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Pie Chart — Expense Breakdown */}
-        <div className="glass-card rounded-2xl p-6 flex flex-col">
-          <div className="flex items-center justify-between mb-5">
+        {/* Categorical Allocation Donut */}
+        <div className="card" style={{ padding: "22px 20px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "18px" }}>
+            <PieIcon size={16} style={{ color: "var(--ink-3)" }} />
             <div>
-              <h2 className="text-[15px] font-bold" style={{ color: "#1d1d1f", letterSpacing: "-0.02em" }}>
-                Expense Breakdown
-              </h2>
-              <p className="text-xs mt-0.5" style={{ color: "#6e6e73" }}>Distribution across categories</p>
-            </div>
-            <div
-              className="analytics-icon w-8 h-8 rounded-xl flex items-center justify-center"
-              style={{ background: "#eef2ff", color: "#4f46e5" }}
-            >
-              <PieIcon size={15} />
+              <span className="section-label">Categorical Breakdown</span>
+              <h3 style={{ fontSize: "15px", fontWeight: "700", color: "var(--ink)" }}>Expense Allocation by Category</h3>
             </div>
           </div>
 
-          <div className="h-[300px] w-full flex items-center justify-center">
-            {categoryWiseExpense.length > 0 ? (
+          <div style={{ width: "100%", height: "280px" }}>
+            {data.categoryWiseExpense && data.categoryWiseExpense.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={categoryWiseExpense}
-                    cx="50%"
-                    cy="45%"
-                    innerRadius={70}
-                    outerRadius={100}
-                    paddingAngle={4}
+                    data={data.categoryWiseExpense}
                     dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={65}
+                    outerRadius={95}
+                    paddingAngle={3}
                   >
-                    {categoryWiseExpense.map((entry, index) => (
-                      <Cell
-                        key={`cell-${index}`}
-                        fill={CHART_COLORS[index % CHART_COLORS.length]}
-                        stroke="#ffffff"
-                        strokeWidth={2}
-                      />
+                    {data.categoryWiseExpense.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={FIN_PALETTE[index % FIN_PALETTE.length]} stroke="var(--surface)" strokeWidth={2} />
                     ))}
                   </Pie>
                   <Tooltip
-                    formatter={(value) => formatCurrency(value)}
-                    contentStyle={TOOLTIP_STYLE}
-                    itemStyle={{ color: "#1d1d1f" }}
+                    contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px" }}
+                    formatter={(val) => [formatCurrency(val), "Allocation"]}
                   />
-                  <Legend
-                    iconType="circle"
-                    layout="horizontal"
-                    verticalAlign="bottom"
-                    align="center"
-                    wrapperStyle={{ fontSize: "11px", paddingTop: "8px", color: "#6e6e73" }}
-                  />
+                  <Legend iconType="circle" wrapperStyle={{ paddingTop: "8px", fontSize: "12px" }} />
                 </PieChart>
               </ResponsiveContainer>
             ) : (
-              <p className="text-sm" style={{ color: "#aeaeb2" }}>No expense category data available</p>
+              <div className="empty-state" style={{ height: "100%", padding: 0 }}>
+                <span>No categorical expense data recorded</span>
+              </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* Key Highlights */}
-      <div className="glass-card rounded-2xl p-6">
-        <h2
-          className="text-[15px] font-bold mb-5 flex items-center gap-2"
-          style={{ color: "#1d1d1f", letterSpacing: "-0.02em" }}
-        >
-          <Award size={18} style={{ color: "#d97706" }} />
-          Key Financial Highlights
-        </h2>
+      {/* Trajectory Area Chart */}
+      <div className="card" style={{ padding: "22px 20px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "18px" }}>
+          <LineIcon size={16} style={{ color: "var(--ink-3)" }} />
+          <div>
+            <span className="section-label">Temporal Drift</span>
+            <h3 style={{ fontSize: "15px", fontWeight: "700", color: "var(--ink)" }}>Net Monthly Cashflow Trajectory</h3>
+          </div>
+        </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            { label: "Top Expense Category", value: highestExpenseCategory, valueColor: "#1d1d1f" },
-            { label: "Top Income Source", value: highestIncomeSource, valueColor: "#059669" },
-            { label: "Avg Monthly Burn", value: formatCurrency(avgMonthlyExpense), valueColor: "#dc2626" },
-            { label: "Avg Monthly Inflow", value: formatCurrency(avgMonthlyIncome), valueColor: "#059669" },
-          ].map((item) => (
-            <div
-              key={item.label}
-              className="highlight-card p-4 rounded-xl"
-              style={{ background: "#f5f5f7", border: "1px solid rgba(0,0,0,0.05)" }}
-            >
-              <span
-                className="text-[10px] font-bold uppercase tracking-widest block mb-2"
-                style={{ color: "#aeaeb2" }}
-              >
-                {item.label}
-              </span>
-              <p
-                className="text-base font-bold font-mono"
-                style={{ color: item.valueColor, letterSpacing: "-0.02em" }}
-              >
-                {item.value}
-              </p>
+        <div style={{ width: "100%", height: "260px" }}>
+          {trajectoryData.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={trajectoryData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="netCashflowGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#0f172a" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#0f172a" stopOpacity={0.0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                <XAxis dataKey="month" tick={{ fill: "var(--ink-3)", fontSize: 11 }} axisLine={{ stroke: "var(--border)" }} />
+                <YAxis tick={{ fill: "var(--ink-3)", fontSize: 11 }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px" }}
+                  formatter={(val) => [formatCurrency(val), "Net Cashflow"]}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="netCashflow"
+                  name="Net Cashflow"
+                  stroke="#0f172a"
+                  strokeWidth={2}
+                  fillOpacity={1}
+                  fill="url(#netCashflowGrad)"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="empty-state" style={{ height: "100%", padding: 0 }}>
+              <span>No trajectory data available</span>
             </div>
-          ))}
+          )}
         </div>
       </div>
     </div>

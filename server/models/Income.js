@@ -1,29 +1,20 @@
-const mongoose = require("mongoose");
+const { db, income } = require("../config/db");
 
-const IncomeSchema = new mongoose.Schema(
-  {
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      required: true,
-      ref: "User",
-    },
-    amount: {
-      type: Number,
-      required: [true, "Amount is required"],
-      min: [0.01, "Amount must be greater than 0"],
-    },
-    source: {
-      type: String,
-      required: [true, "Source is required"],
-      enum: ["Salary", "Freelancing", "Business", "Investments", "Gift", "Other"],
-    },
-    date: {
-      type: Date,
-      required: [true, "Date is required"],
-      default: Date.now,
-    },
+module.exports = {
+  list: async (userId) => db.prepare("SELECT * FROM income WHERE user_id = ? ORDER BY date DESC, id DESC").all(userId).map(income),
+  create: async (data) => {
+    const result = db.prepare("INSERT INTO income (user_id, amount, source, date) VALUES (?, ?, ?, ?)")
+      .run(data.userId, data.amount, data.source, data.date);
+    return income(db.prepare("SELECT * FROM income WHERE id = ?").get(result.lastInsertRowid));
   },
-  { timestamps: true }
-);
-
-module.exports = mongoose.model("Income", IncomeSchema);
+  findById: async (id) => income(db.prepare("SELECT * FROM income WHERE id = ?").get(id)),
+  update: async (id, fields) => {
+    const keys = Object.keys(fields);
+    if (keys.length) {
+      const assigns = keys.map((key) => `${key === "userId" ? "user_id" : key} = @${key}`).join(", ");
+      db.prepare(`UPDATE income SET ${assigns} WHERE id = @id`).run({ ...fields, id });
+    }
+    return income(db.prepare("SELECT * FROM income WHERE id = ?").get(id));
+  },
+  remove: (id) => db.prepare("DELETE FROM income WHERE id = ?").run(id),
+};

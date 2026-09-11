@@ -1,272 +1,502 @@
-import { useState, useEffect, useCallback } from "react";
-import { Plus, Search, Edit2, Trash2, Wallet } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import {
+  Plus,
+  Search,
+  ArrowUpDown,
+  Edit2,
+  Trash2,
+  Check,
+  X,
+  Wallet,
+  Download,
+  Filter,
+} from "lucide-react";
 import API from "../services/api";
+import { useToast } from "../context/ToastContext";
+import { formatCurrency, formatDate, formatInputDate } from "../utils/formatters";
+import { onDataChanged } from "../utils/dataEvents";
 import IncomeModal from "../components/IncomeModal";
 import DeleteConfirmModal from "../components/DeleteConfirmModal";
-import { useToast } from "../context/ToastContext";
-import { formatCurrency, formatDate } from "../utils/formatters";
 
-const SOURCES = ["All Sources", "Salary", "Freelancing", "Business", "Investments", "Gift", "Other"];
-
-const SOURCE_STYLES = {
-  Salary:       { bg: "#f0fdf4", color: "#14532d", border: "rgba(34,197,94,0.2)" },
-  Freelancing:  { bg: "#eff6ff", color: "#1e40af", border: "rgba(59,130,246,0.2)" },
-  Business:     { bg: "#faf5ff", color: "#6b21a8", border: "rgba(168,85,247,0.2)" },
-  Investments:  { bg: "#fffbeb", color: "#78350f", border: "rgba(245,158,11,0.2)" },
-  Gift:         { bg: "#fdf2f8", color: "#9d174d", border: "rgba(236,72,153,0.2)" },
-  Other:        { bg: "#f5f5f7", color: "#6e6e73", border: "rgba(0,0,0,0.1)" },
-};
-
-const getSourceBadge = (source) => {
-  const s = SOURCE_STYLES[source] || SOURCE_STYLES.Other;
-  return (
-    <span
-      className="source-badge px-2.5 py-1 rounded-lg text-[11px] font-semibold"
-      style={{ background: s.bg, color: s.color, border: `1px solid ${s.border}` }}
-    >
-      {source}
-    </span>
-  );
-};
+const SOURCES = [
+  "All",
+  "Salary",
+  "Freelancing",
+  "Business",
+  "Investments",
+  "Gift",
+  "Other",
+];
 
 const Income = () => {
   const toast = useToast();
   const [incomeList, setIncomeList] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const [isIncomeModalOpen, setIsIncomeModalOpen] = useState(false);
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [incomeToEdit, setIncomeToEdit] = useState(null);
-  const [incomeToDelete, setIncomeToDelete] = useState(null);
+  // Search, filter, sorting
+  const [search, setSearch] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("All");
+  const [sortField, setSortField] = useState("date");
+  const [sortOrder, setSortOrder] = useState("desc");
 
-  const [searchTerm, setSearchTerm] = useState("");
-  const [sourceFilter, setSourceFilter] = useState("All Sources");
+  // Modals
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingIncome, setEditingIncome] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Inline editing state
+  const [inlineEditingId, setInlineEditingId] = useState(null);
+  const [inlineForm, setInlineForm] = useState({
+    source: "",
+    amount: "",
+    date: "",
+  });
+  const [isSavingInline, setIsSavingInline] = useState(false);
 
   const fetchIncome = useCallback(async () => {
+    setLoading(true);
     try {
       const { data } = await API.get("/api/income");
-      if (data.success) setIncomeList(data.data);
-    } catch (error) {
-      console.error("Failed to fetch income:", error);
-      toast.error("Failed to load income list.");
+      if (data.success && Array.isArray(data.data)) {
+        setIncomeList(data.data);
+      }
+    } catch {
+      toast.error("Failed to load income records.");
     } finally {
       setLoading(false);
     }
   }, [toast]);
 
-  useEffect(() => { fetchIncome(); }, [fetchIncome]);
+  useEffect(() => {
+    fetchIncome();
+  }, [fetchIncome]);
 
-  const handleSaveIncome = async (incomeData) => {
+  // The AI assistant can add income — refresh silently when data changes.
+  useEffect(() => onDataChanged(() => fetchIncome()), [fetchIncome]);
+
+  const handleSaveIncome = async (payload) => {
+    const request = editingIncome
+      ? API.put(`/api/income/${editingIncome._id}`, payload)
+      : API.post("/api/income", payload);
+    const { data } = await request;
+    if (!data.success) throw new Error(data.message || "Income could not be saved.");
+    setModalOpen(false);
+    setEditingIncome(null);
+    await fetchIncome();
+    toast.success(editingIncome ? "Income updated" : "Income added to ledger");
+  };
+
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortOrder("desc");
+    }
+  };
+
+  const filteredIncome = useMemo(() => {
+    return incomeList
+      .filter((item) => {
+        const matchesSearch = (item.source || "")
+          .toLowerCase()
+          .includes(search.toLowerCase());
+        const matchesSource =
+          sourceFilter === "All" || item.source === sourceFilter;
+        return matchesSearch && matchesSource;
+      })
+      .sort((a, b) => {
+        let valA = a[sortField];
+        let valB = b[sortField];
+
+        if (sortField === "amount") {
+          valA = Number(valA) || 0;
+          valB = Number(valB) || 0;
+        } else if (sortField === "date") {
+          valA = new Date(valA).getTime();
+          valB = new Date(valB).getTime();
+        } else {
+          valA = (valA || "").toString().toLowerCase();
+          valB = (valB || "").toString().toLowerCase();
+        }
+
+        if (valA < valB) return sortOrder === "asc" ? -1 : 1;
+        if (valA > valB) return sortOrder === "asc" ? 1 : -1;
+        return 0;
+      });
+  }, [incomeList, search, sourceFilter, sortField, sortOrder]);
+
+  const visibleTotal = useMemo(() => {
+    return filteredIncome.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  }, [filteredIncome]);
+
+  const startInlineEdit = (item) => {
+    setInlineEditingId(item._id);
+    setInlineForm({
+      source: item.source || "Salary",
+      amount: item.amount,
+      date: formatInputDate(item.date),
+    });
+  };
+
+  const cancelInlineEdit = () => {
+    setInlineEditingId(null);
+    setInlineForm({ source: "", amount: "", date: "" });
+  };
+
+  const saveInlineEdit = async (id) => {
+    if (!inlineForm.source || !inlineForm.amount) {
+      toast.error("Please fill in source and amount.");
+      return;
+    }
+    setIsSavingInline(true);
     try {
-      if (incomeToEdit) {
-        await API.put(`/api/income/${incomeToEdit._id}`, incomeData);
+      const { data } = await API.put(`/api/income/${id}`, {
+        source: inlineForm.source,
+        amount: parseFloat(inlineForm.amount),
+        date: inlineForm.date,
+      });
+
+      if (data.success) {
+        setIncomeList((prev) =>
+          prev.map((item) => (item._id === id ? data.data : item))
+        );
         toast.success("Income record updated successfully");
-      } else {
-        await API.post("/api/income", incomeData);
-        toast.success("Income record added successfully");
+        cancelInlineEdit();
       }
-      setIsIncomeModalOpen(false);
-      setIncomeToEdit(null);
-      fetchIncome();
-    } catch (error) {
-      console.error("Failed to save income:", error);
-      toast.error(error.response?.data?.message || "Failed to save income record");
+    } catch {
+      toast.error("Failed to update income record");
+    } finally {
+      setIsSavingInline(false);
     }
   };
 
   const handleDeleteConfirm = async () => {
-    if (!incomeToDelete) return;
+    if (!deleteTarget) return;
+    setIsDeleting(true);
     try {
-      await API.delete(`/api/income/${incomeToDelete._id}`);
-      toast.success("Income record deleted successfully");
-      setIsDeleteModalOpen(false);
-      setIncomeToDelete(null);
-      fetchIncome();
-    } catch (error) {
-      console.error("Failed to delete income:", error);
+      const { data } = await API.delete(`/api/income/${deleteTarget._id}`);
+      if (data.success) {
+        setIncomeList((prev) =>
+          prev.filter((item) => item._id !== deleteTarget._id)
+        );
+        toast.success("Income record removed");
+        setDeleteTarget(null);
+      }
+    } catch {
       toast.error("Failed to delete income record");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
-  const filteredIncome = incomeList.filter((inc) => {
-    const matchesSearch = String(inc.source || "").toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesSource = sourceFilter === "All Sources" || inc.source === sourceFilter;
-    return matchesSearch && matchesSource;
-  });
-
-  const totalFilteredAmount = filteredIncome.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const handleExportCSV = () => {
+    if (incomeList.length === 0) {
+      toast.info("No income data to export.");
+      return;
+    }
+    const headers = ["Date", "Source", "Amount (INR)"];
+    const rows = filteredIncome.map((i) => [
+      formatDate(i.date),
+      `"${(i.source || "").replace(/"/g, '""')}"`,
+      i.amount,
+    ]);
+    const csvContent =
+      "data:text/csv;charset=utf-8," +
+      [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute(
+      "download",
+      `income_export_${new Date().toISOString().split("T")[0]}.csv`
+    );
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("CSV export downloaded");
+  };
 
   return (
-    <div className="app-page flex flex-col gap-6 max-w-7xl mx-auto pb-12 animate-slide-up">
+    <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "flex-start",
+        flexWrap: "wrap",
+        gap: "16px",
+      }}>
         <div>
-          <h1
-            className="text-2xl sm:text-[28px] font-black flex items-center gap-2.5"
-            style={{ color: "#1d1d1f", letterSpacing: "-0.03em" }}
-          >
-            <Wallet size={24} style={{ color: "#059669" }} />
-            Income Streams
+          <h1 style={{ fontSize: "24px", fontWeight: "700", letterSpacing: "-0.025em", color: "var(--ink)" }}>
+            Income Ledger
           </h1>
-          <p className="text-sm mt-0.5" style={{ color: "#6e6e73" }}>
-            Log earnings, salaries, dividends, and cash inflow.
+          <p style={{ fontSize: "13.5px", color: "var(--ink-3)", marginTop: "2px" }}>
+            Verified record of capital receipts, salary, dividends, and cash inflows
           </p>
         </div>
 
-        <button
-          onClick={() => { setIncomeToEdit(null); setIsIncomeModalOpen(true); }}
-          className="app-action-income flex items-center gap-2 px-5 py-2.5 text-white font-semibold text-sm rounded-xl shadow-sm shadow-emerald-500/20 active-press cursor-pointer"
-          style={{ background: "#059669" }}
-          onMouseEnter={e => (e.currentTarget.style.background = "#047857")}
-          onMouseLeave={e => (e.currentTarget.style.background = "#059669")}
-        >
-          <Plus size={16} />
-          Add Income
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+          <button
+            onClick={handleExportCSV}
+            className="btn btn-secondary"
+            style={{ height: "38px" }}
+            title="Download CSV report"
+          >
+            <Download size={15} />
+            <span>Export CSV</span>
+          </button>
+          <button
+            onClick={() => {
+              setEditingIncome(null);
+              setModalOpen(true);
+            }}
+            className="btn btn-primary"
+            style={{ height: "38px" }}
+          >
+            <Plus size={15} />
+            <span>Add Income</span>
+          </button>
+        </div>
       </div>
 
-      {/* Filter Bar */}
-      <div className="glass-card p-4 rounded-2xl flex flex-col sm:flex-row gap-3 items-center">
-        <div className="flex flex-col sm:flex-row gap-3 w-full sm:flex-1">
-          {/* Search */}
-          <div className="relative flex-1 max-w-sm">
+      {/* Control Strip */}
+      <div className="card" style={{ padding: "16px 20px" }}>
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "14px",
+        }}>
+          {/* Search bar */}
+          <div style={{ position: "relative", minWidth: "260px", flex: 1 }}>
             <input
               type="text"
-              placeholder="Search income by source..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full glass-input px-4 py-2.5 pl-10 rounded-xl text-sm"
-              style={{ color: "#1d1d1f" }}
+              placeholder="Search source..."
+              className="input"
+              style={{ paddingLeft: "36px", height: "36px" }}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
             />
-            <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "#aeaeb2" }} />
+            <Search size={14} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "var(--ink-4)" }} />
           </div>
 
           {/* Source Filter */}
-          <div className="w-full sm:w-44">
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <Filter size={14} style={{ color: "var(--ink-3)" }} />
             <select
+              className="input"
+              style={{ width: "160px", height: "36px", padding: "0 10px", fontSize: "13px" }}
               value={sourceFilter}
               onChange={(e) => setSourceFilter(e.target.value)}
-              className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
-              style={{ color: "#1d1d1f" }}
             >
               {SOURCES.map((src) => (
-                <option key={src} value={src}>{src}</option>
+                <option key={src} value={src}>
+                  {src === "All" ? "All Sources" : src}
+                </option>
               ))}
             </select>
           </div>
-        </div>
 
-        {/* Total */}
-        <div
-          className="px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap"
-          style={{ background: "#f0fdf4", color: "#047857", border: "1px solid rgba(5,150,105,0.15)" }}
-        >
-          Inflow:{" "}
-          <span className="font-mono font-bold">+{formatCurrency(totalFilteredAmount)}</span>
+          {/* Visible Sum Badge */}
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", background: "var(--fin-green-bg)", padding: "6px 12px", borderRadius: "var(--r-sm)", border: "1px solid var(--fin-green-border)" }}>
+            <span style={{ fontSize: "11px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--fin-green)" }}>
+              Visible Inflow:
+            </span>
+            <span className="font-mono" style={{ fontSize: "14px", fontWeight: "700", color: "var(--fin-green)" }}>
+              + {formatCurrency(visibleTotal)}
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="glass-card rounded-2xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="app-data-table w-full text-left border-collapse">
-            <thead>
-              <tr style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
-                {["Date", "Income Source", "Amount", "Actions"].map((h, i) => (
-                  <th
-                    key={h}
-                    className="py-3.5 px-5 text-[11px] font-bold uppercase tracking-widest"
-                    style={{
-                      color: "#aeaeb2",
-                      background: "#fafafa",
-                      textAlign: i === 3 ? "right" : "left",
-                    }}
-                  >
-                    {h}
+      {/* Main Ledger Table */}
+      <div className="card" style={{ overflow: "hidden" }}>
+        {loading ? (
+          <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "12px" }}>
+            <div className="skeleton" style={{ height: "42px" }} />
+            <div className="skeleton" style={{ height: "42px" }} />
+            <div className="skeleton" style={{ height: "42px" }} />
+          </div>
+        ) : filteredIncome.length > 0 ? (
+          <div style={{ overflowX: "auto" }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th className="sortable" onClick={() => handleSort("date")} style={{ width: "140px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      Date <ArrowUpDown size={12} />
+                    </div>
                   </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan="4" className="p-10 text-center text-sm" style={{ color: "#aeaeb2" }}>
-                    <span className="inline-block w-4 h-4 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin mr-2" />
-                    Loading income records...
-                  </td>
+                  <th className="sortable" onClick={() => handleSort("source")}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      Source <ArrowUpDown size={12} />
+                    </div>
+                  </th>
+                  <th className="sortable" onClick={() => handleSort("amount")} style={{ textAlign: "right", width: "180px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px" }}>
+                      Amount Received <ArrowUpDown size={12} />
+                    </div>
+                  </th>
+                  <th style={{ textAlign: "right", width: "110px" }}>Actions</th>
                 </tr>
-              ) : filteredIncome.length === 0 ? (
-                <tr>
-                  <td colSpan="4" className="p-12 text-center">
-                    <Wallet size={32} className="mx-auto mb-3" style={{ color: "#e5e5ea" }} />
-                    <p className="text-sm font-semibold mb-1" style={{ color: "#1d1d1f" }}>No income records found</p>
-                    <p className="text-xs" style={{ color: "#aeaeb2" }}>
-                      Start by recording your monthly salary or earnings.
-                    </p>
-                  </td>
-                </tr>
-              ) : (
-                filteredIncome.map((inc) => (
-                  <tr
-                    key={inc._id}
-                    className="data-row group transition-colors"
-                    style={{ borderBottom: "1px solid rgba(0,0,0,0.04)" }}
-                    onMouseEnter={e => (e.currentTarget.style.background = "#f9f9f9")}
-                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
-                  >
-                    <td className="date-cell py-3.5 px-5 text-xs font-mono" style={{ color: "#aeaeb2" }}>
-                      {formatDate(inc.date)}
-                    </td>
-                    <td className="py-3.5 px-5">
-                      {getSourceBadge(inc.source)}
-                    </td>
-                    <td className="amount-cell is-income py-3.5 px-5 text-sm font-bold font-mono" style={{ color: "#059669" }}>
-                      +{formatCurrency(inc.amount)}
-                    </td>
-                    <td className="py-3.5 px-5 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => { setIncomeToEdit(inc); setIsIncomeModalOpen(true); }}
-                          className="table-icon-button p-1.5 rounded-lg active-press cursor-pointer transition-colors"
-                          style={{ color: "#aeaeb2" }}
-                          onMouseEnter={e => { e.currentTarget.style.color = "#059669"; e.currentTarget.style.background = "#f0fdf4"; }}
-                          onMouseLeave={e => { e.currentTarget.style.color = "#aeaeb2"; e.currentTarget.style.background = "transparent"; }}
-                          title="Edit income"
-                        >
-                          <Edit2 size={14} />
-                        </button>
-                        <button
-                          onClick={() => { setIncomeToDelete(inc); setIsDeleteModalOpen(true); }}
-                          className="table-icon-button p-1.5 rounded-lg active-press cursor-pointer transition-colors"
-                          style={{ color: "#aeaeb2" }}
-                          onMouseEnter={e => { e.currentTarget.style.color = "#dc2626"; e.currentTarget.style.background = "#fef2f2"; }}
-                          onMouseLeave={e => { e.currentTarget.style.color = "#aeaeb2"; e.currentTarget.style.background = "transparent"; }}
-                          title="Delete income"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filteredIncome.map((item) => {
+                  const isInline = inlineEditingId === item._id;
+
+                  if (isInline) {
+                    return (
+                      <tr key={item._id} style={{ background: "#f1f5f9" }}>
+                        <td>
+                          <input
+                            type="date"
+                            className="input"
+                            style={{ height: "32px", fontSize: "12px", padding: "0 6px" }}
+                            value={inlineForm.date}
+                            onChange={(e) => setInlineForm({ ...inlineForm, date: e.target.value })}
+                          />
+                        </td>
+                        <td>
+                          <select
+                            className="input"
+                            style={{ height: "32px", fontSize: "12.5px" }}
+                            value={inlineForm.source}
+                            onChange={(e) => setInlineForm({ ...inlineForm, source: e.target.value })}
+                          >
+                            {SOURCES.filter((s) => s !== "All").map((src) => (
+                              <option key={src} value={src}>{src}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <input
+                            type="number"
+                            step="any"
+                            className="input font-mono"
+                            style={{ height: "32px", fontSize: "12.5px", textAlign: "right", width: "130px", marginLeft: "auto" }}
+                            value={inlineForm.amount}
+                            onChange={(e) => setInlineForm({ ...inlineForm, amount: e.target.value })}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveInlineEdit(item._id);
+                              if (e.key === "Escape") cancelInlineEdit();
+                            }}
+                          />
+                        </td>
+                        <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                          <div style={{ display: "inline-flex", gap: "4px" }}>
+                            <button
+                              onClick={() => saveInlineEdit(item._id)}
+                              className="btn btn-primary"
+                              style={{ width: "28px", height: "28px", padding: 0 }}
+                              disabled={isSavingInline}
+                              title="Save changes (Enter)"
+                            >
+                              <Check size={14} />
+                            </button>
+                            <button
+                              onClick={cancelInlineEdit}
+                              className="btn btn-secondary"
+                              style={{ width: "28px", height: "28px", padding: 0 }}
+                              title="Cancel (Esc)"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  return (
+                    <tr
+                      key={item._id}
+                      onDoubleClick={() => startInlineEdit(item)}
+                      title="Double-click to inline edit"
+                    >
+                      <td style={{ color: "var(--ink-3)", whiteSpace: "nowrap", fontSize: "12px" }}>
+                        {formatDate(item.date)}
+                      </td>
+                      <td style={{ fontWeight: "600" }}>
+                        <span className="badge badge-green" style={{ fontSize: "12px", padding: "3px 8px" }}>
+                          {item.source}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <span className="font-mono" style={{ fontWeight: "600", color: "var(--fin-green)" }}>
+                          + {formatCurrency(item.amount)}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                        <div style={{ display: "inline-flex", gap: "4px" }}>
+                          <button
+                            onClick={() => startInlineEdit(item)}
+                            className="btn-icon"
+                            title="Inline edit row"
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            onClick={() => setDeleteTarget(item)}
+                            className="btn-icon"
+                            style={{ color: "var(--fin-red)" }}
+                            title="Delete record"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="empty-state" style={{ padding: "50px 20px" }}>
+            <Wallet size={32} style={{ marginBottom: "10px", opacity: 0.5 }} />
+            <h3 style={{ fontSize: "15px", fontWeight: "600", color: "var(--ink)", marginBottom: "4px" }}>
+              No matching income records
+            </h3>
+            <p style={{ fontSize: "13px", color: "var(--ink-3)", marginBottom: "16px" }}>
+              {search || sourceFilter !== "All"
+                ? "Try adjusting your search criteria or source filter."
+                : "No income recorded yet. Click below to add your first revenue inflow."}
+            </p>
+            <button
+              onClick={() => {
+                setEditingIncome(null);
+                setModalOpen(true);
+              }}
+              className="btn btn-primary"
+            >
+              <Plus size={14} /> Add First Income
+            </button>
+          </div>
+        )}
       </div>
 
+      {/* Modal Dialog */}
       <IncomeModal
-        isOpen={isIncomeModalOpen}
-        onClose={() => setIsIncomeModalOpen(false)}
+        isOpen={modalOpen}
+        onClose={() => {
+          setModalOpen(false);
+          setEditingIncome(null);
+        }}
+        incomeToEdit={editingIncome}
         onSave={handleSaveIncome}
-        incomeToEdit={incomeToEdit}
       />
+
+      {/* Delete Confirmation Modal */}
       <DeleteConfirmModal
-        isOpen={isDeleteModalOpen}
-        onClose={() => setIsDeleteModalOpen(false)}
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
         onConfirm={handleDeleteConfirm}
         title="Delete Income Record"
-        message="Are you sure you want to delete this income record? This will adjust your total balance calculation."
+        message={`Are you sure you want to permanently delete this ${deleteTarget?.source || "income"} entry of ${formatCurrency(deleteTarget?.amount || 0)}?`}
+        loading={isDeleting}
       />
     </div>
   );

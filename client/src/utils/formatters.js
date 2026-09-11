@@ -1,9 +1,9 @@
 /**
- * Format a number as Indian Rupee (₹) currency string
- * @param {number|string} amount
- * @param {number} decimals
- * @returns {string}
+ * Currency & date formatters — INR locale.
+ * Uses Intl so output respects the user's runtime locale.
  */
+
+/** Format a number as Indian Rupee (₹) currency */
 export const formatCurrency = (amount, decimals = 2) => {
   const num = typeof amount === "number" ? amount : parseFloat(amount) || 0;
   return new Intl.NumberFormat("en-IN", {
@@ -14,30 +14,44 @@ export const formatCurrency = (amount, decimals = 2) => {
   }).format(num);
 };
 
-/**
- * Format a date string into a user-friendly format (e.g. "02 Sep 2026")
- * @param {string|Date} dateStr
- * @returns {string}
- */
+/** Format a date string for display (e.g. "02 Sep 2026") */
 export const formatDate = (dateStr) => {
   if (!dateStr) return "N/A";
-  const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return String(dateStr);
-  return date.toLocaleDateString("en-US", {
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return String(dateStr);
+  return d.toLocaleDateString("en-US", {
     day: "2-digit",
     month: "short",
     year: "numeric",
   });
 };
 
-/**
- * Format date for input[type="date"] (YYYY-MM-DD)
- * @param {string|Date} dateStr
- * @returns {string}
- */
+/** Local YYYY-MM-DD for <input type="date"> — never toISOString (UTC shift). */
 export const formatInputDate = (dateStr) => {
-  if (!dateStr) return new Date().toISOString().split("T")[0];
-  const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return new Date().toISOString().split("T")[0];
-  return date.toISOString().split("T")[0];
+  const d = dateStr ? new Date(dateStr) : new Date();
+  if (isNaN(d.getTime())) {
+    const now = new Date();
+    return localISO(now);
+  }
+  return localISO(d);
+};
+
+/** Format a Date using its LOCAL calendar parts (timezone-safe). */
+export const localISO = (d) => {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+/** Today's local date as YYYY-MM-DD. */
+export const todayISO = () => localISO(new Date());
+
+/** Resolve a natural-language date ("yesterday") to YYYY-MM-DD. */
+export const resolveDateWord = (text) => {
+  if (/\byesterday\b/i.test(text)) {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return localISO(d);
+  }
+  const match = text.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+  return match ? match[0] : todayISO();
 };

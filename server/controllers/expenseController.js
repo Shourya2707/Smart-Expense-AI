@@ -1,124 +1,55 @@
 const Expense = require("../models/Expense");
-const mongoose = require("mongoose");
+const { CATEGORIES, isValidDate } = require("../services/analyticsService");
 
-// @desc    Get all expenses for logged in user
-// @route   GET /api/expenses
-// @access  Private
-exports.getExpenses = async (req, res) => {
-  try {
-    const expenses = await Expense.find({ userId: req.user._id }).sort({ date: -1 });
-    res.status(200).json({ success: true, data: expenses });
-  } catch (error) {
-    console.error("Get Expenses Error:", error.message);
-    res.status(500).json({ success: false, message: "Server Error" });
-  }
-};
+const validId = (id) => /^\d+$/.test(String(id));
+const round = (n) => Math.round(n * 100) / 100;
 
-// @desc    Create new expense
-// @route   POST /api/expenses
-// @access  Private
+exports.getExpenses = async (req, res) => res.json({ success: true, data: await Expense.list(req.user._id) });
+
 exports.createExpense = async (req, res) => {
-  try {
-    const { amount, category, description, date } = req.body;
-    const normalizedDescription = typeof description === "string" ? description.trim() : "";
-
-    if (!amount || !category || !normalizedDescription || !date) {
-      return res.status(400).json({ success: false, message: "Please provide all required fields" });
-    }
-
-    const parsedAmount = parseFloat(amount);
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      return res.status(400).json({ success: false, message: "Amount must be greater than 0" });
-    }
-
-    const expense = await Expense.create({
-      userId: req.user._id,
-      amount: parsedAmount,
-      category,
-      description: normalizedDescription,
-      date,
-    });
-
-    res.status(201).json({ success: true, data: expense, message: "Expense created successfully" });
-  } catch (error) {
-    console.error("Create Expense Error:", error.message);
-    res.status(500).json({ success: false, message: "Server Error" });
+  const { amount, category, description, date } = req.body;
+  const parsed = Number(amount);
+  if (!Number.isFinite(parsed) || parsed <= 0 || !CATEGORIES.includes(category) || !description?.trim() || !isValidDate(date)) {
+    return res.status(400).json({ success: false, message: "Enter a valid amount, category, description, and date (YYYY-MM-DD)." });
   }
+  const data = await Expense.create({ userId: req.user._id, amount: round(parsed), category, description: description.trim(), date });
+  res.status(201).json({ success: true, data, message: "Expense saved." });
 };
 
-// @desc    Update an expense
-// @route   PUT /api/expenses/:id
-// @access  Private
 exports.updateExpense = async (req, res) => {
-  try {
-    if (!mongoose.isValidObjectId(req.params.id)) {
-      return res.status(400).json({ success: false, message: "Invalid expense id" });
-    }
-    let expense = await Expense.findById(req.params.id);
+  if (!validId(req.params.id)) return res.status(400).json({ success: false, message: "Invalid expense id." });
+  const existing = await Expense.findById(req.params.id);
+  if (!existing) return res.status(404).json({ success: false, message: "Expense not found." });
+  if (existing.userId !== req.user._id) return res.status(403).json({ success: false, message: "You cannot edit this expense." });
 
-    if (!expense) {
-      return res.status(404).json({ success: false, message: "Expense not found" });
-    }
-
-    // Make sure user owns expense
-    if (expense.userId.toString() !== req.user._id.toString()) {
-      return res.status(401).json({ success: false, message: "Not authorized to update this expense" });
-    }
-
-    const { amount, category, description, date } = req.body;
-    const updateFields = {};
-    if (amount !== undefined) {
-      const parsedAmount = parseFloat(amount);
-      if (isNaN(parsedAmount) || parsedAmount <= 0) {
-        return res.status(400).json({ success: false, message: "Amount must be greater than 0" });
-      }
-      updateFields.amount = parsedAmount;
-    }
-    if (category !== undefined) updateFields.category = category;
-    if (description !== undefined) {
-      if (typeof description !== "string" || !description.trim()) {
-        return res.status(400).json({ success: false, message: "Description cannot be empty" });
-      }
-      updateFields.description = description.trim();
-    }
-    if (date !== undefined) updateFields.date = date;
-
-    expense = await Expense.findByIdAndUpdate(req.params.id, updateFields, {
-      new: true,
-      runValidators: true,
-    });
-
-    res.status(200).json({ success: true, data: expense, message: "Expense updated successfully" });
-  } catch (error) {
-    console.error("Update Expense Error:", error.message);
-    res.status(500).json({ success: false, message: "Server Error" });
+  const fields = {};
+  if (req.body.amount !== undefined) {
+    const n = Number(req.body.amount);
+    if (!Number.isFinite(n) || n <= 0) return res.status(400).json({ success: false, message: "Amount must be greater than 0." });
+    fields.amount = round(n);
   }
+  if (req.body.category !== undefined) {
+    if (!CATEGORIES.includes(req.body.category)) return res.status(400).json({ success: false, message: `Category must be one of: ${CATEGORIES.join(", ")}` });
+    fields.category = req.body.category;
+  }
+  if (req.body.description !== undefined) {
+    if (!String(req.body.description).trim()) return res.status(400).json({ success: false, message: "Description cannot be empty." });
+    fields.description = String(req.body.description).trim();
+  }
+  if (req.body.date !== undefined) {
+    if (!isValidDate(req.body.date)) return res.status(400).json({ success: false, message: "Date must be YYYY-MM-DD." });
+    fields.date = req.body.date;
+  }
+  if (!Object.keys(fields).length) return res.status(400).json({ success: false, message: "Nothing to update." });
+
+  res.json({ success: true, data: await Expense.update(req.params.id, fields), message: "Expense updated." });
 };
 
-// @desc    Delete an expense
-// @route   DELETE /api/expenses/:id
-// @access  Private
 exports.deleteExpense = async (req, res) => {
-  try {
-    if (!mongoose.isValidObjectId(req.params.id)) {
-      return res.status(400).json({ success: false, message: "Invalid expense id" });
-    }
-    const expense = await Expense.findById(req.params.id);
-
-    if (!expense) {
-      return res.status(404).json({ success: false, message: "Expense not found" });
-    }
-
-    // Make sure user owns expense
-    if (expense.userId.toString() !== req.user._id.toString()) {
-      return res.status(401).json({ success: false, message: "Not authorized to delete this expense" });
-    }
-
-    await expense.deleteOne();
-
-    res.status(200).json({ success: true, data: {}, message: "Expense deleted successfully" });
-  } catch (error) {
-    console.error("Delete Expense Error:", error.message);
-    res.status(500).json({ success: false, message: "Server Error" });
-  }
+  if (!validId(req.params.id)) return res.status(400).json({ success: false, message: "Invalid expense id." });
+  const existing = await Expense.findById(req.params.id);
+  if (!existing) return res.status(404).json({ success: false, message: "Expense not found." });
+  if (existing.userId !== req.user._id) return res.status(403).json({ success: false, message: "You cannot delete this expense." });
+  Expense.remove(req.params.id);
+  res.json({ success: true, data: {}, message: "Expense deleted." });
 };

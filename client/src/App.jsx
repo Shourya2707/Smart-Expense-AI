@@ -1,62 +1,63 @@
-import { lazy, Suspense } from "react";
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
-import { AuthProvider } from "./context/AuthContext";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ToastProvider } from "./context/ToastContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardLayout from "./layouts/DashboardLayout";
 
-// Code-split route components for optimal initial bundle performance
-const Home = lazy(() => import("./pages/Home"));
-const Login = lazy(() => import("./pages/Login"));
-const Signup = lazy(() => import("./pages/Signup"));
-const Dashboard = lazy(() => import("./pages/Dashboard"));
-const Expenses = lazy(() => import("./pages/Expenses"));
-const Income = lazy(() => import("./pages/Income"));
-const Analytics = lazy(() => import("./pages/Analytics"));
-const ReceiptScanner = lazy(() => import("./pages/ReceiptScanner"));
-const Profile = lazy(() => import("./pages/Profile"));
+// Pages
+import Home from "./pages/Home";
+import Login from "./pages/Login";
+import Signup from "./pages/Signup";
+import Dashboard from "./pages/Dashboard";
+import Expenses from "./pages/Expenses";
+import Income from "./pages/Income";
+import Analytics from "./pages/Analytics";
+import ReceiptScanner from "./pages/ReceiptScanner";
+import Profile from "./pages/Profile";
+import AdminDashboard from "./pages/AdminDashboard";
 
-const PageLoader = () => (
-  <div className="page-loader min-h-[50vh] flex items-center justify-center">
-    <div className="flex flex-col items-center gap-2.5">
-      <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-      <span className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: "#aeaeb2" }}>Loading...</span>
-    </div>
-  </div>
-);
-
-const App = () => {
+function App() {
   return (
     <AuthProvider>
-      <ToastProvider>
-        <Router>
-          <Suspense fallback={<PageLoader />}>
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/login" element={<Login />} />
-              <Route path="/signup" element={<Signup />} />
-
-              {/* Protected Dashboard Routes */}
-              <Route
-                element={
-                  <ProtectedRoute>
-                    <DashboardLayout />
-                  </ProtectedRoute>
-                }
-              >
-                <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/expenses" element={<Expenses />} />
-                <Route path="/income" element={<Income />} />
-                <Route path="/analytics" element={<Analytics />} />
-                <Route path="/receipt-scanner" element={<ReceiptScanner />} />
-                <Route path="/profile" element={<Profile />} />
-              </Route>
-            </Routes>
-          </Suspense>
-        </Router>
-      </ToastProvider>
+      <BrowserRouter>
+        <ToastProvider>
+          <AppRoutes />
+        </ToastProvider>
+      </BrowserRouter>
     </AuthProvider>
   );
-};
+}
+
+function AppRoutes() {
+  const { user } = useAuth();
+  return (
+    <Routes>
+      {/* Public routes */}
+      <Route path="/" element={<Home />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/signup" element={<Signup />} />
+
+      {/* Authenticated routes */}
+      <Route
+        element={
+          <ProtectedRoute>
+            <DashboardLayout />
+          </ProtectedRoute>
+        }
+      >
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/expenses" element={<Expenses />} />
+        <Route path="/income" element={<Income />} />
+        <Route path="/analytics" element={<Analytics />} />
+        <Route path="/receipt-scanner" element={<ReceiptScanner />} />
+        <Route path="/profile" element={<Profile />} />
+        {user?.isAdmin && <Route path="/admin" element={<AdminDashboard />} />}
+      </Route>
+
+      {/* Fallback route */}
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
 
 export default App;

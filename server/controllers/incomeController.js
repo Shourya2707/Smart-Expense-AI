@@ -1,116 +1,51 @@
 const Income = require("../models/Income");
-const mongoose = require("mongoose");
+const { SOURCES, isValidDate } = require("../services/analyticsService");
 
-// @desc    Get all income for logged in user
-// @route   GET /api/income
-// @access  Private
-exports.getIncome = async (req, res) => {
-  try {
-    const income = await Income.find({ userId: req.user._id }).sort({ date: -1 });
-    res.status(200).json({ success: true, data: income });
-  } catch (error) {
-    console.error("Get Income Error:", error.message);
-    res.status(500).json({ success: false, message: "Server Error" });
-  }
-};
+const validId = (id) => /^\d+$/.test(String(id));
+const round = (n) => Math.round(n * 100) / 100;
 
-// @desc    Create new income
-// @route   POST /api/income
-// @access  Private
+exports.getIncome = async (req, res) => res.json({ success: true, data: await Income.list(req.user._id) });
+
 exports.createIncome = async (req, res) => {
-  try {
-    const { amount, source, date } = req.body;
-
-    if (!amount || !source || !date) {
-      return res.status(400).json({ success: false, message: "Please provide all required fields" });
-    }
-
-    const parsedAmount = parseFloat(amount);
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      return res.status(400).json({ success: false, message: "Amount must be greater than 0" });
-    }
-
-    const income = await Income.create({
-      userId: req.user._id,
-      amount: parsedAmount,
-      source,
-      date,
-    });
-
-    res.status(201).json({ success: true, data: income, message: "Income created successfully" });
-  } catch (error) {
-    console.error("Create Income Error:", error.message);
-    res.status(500).json({ success: false, message: "Server Error" });
+  const { amount, source, date } = req.body;
+  const parsed = Number(amount);
+  if (!Number.isFinite(parsed) || parsed <= 0 || !SOURCES.includes(source) || !isValidDate(date)) {
+    return res.status(400).json({ success: false, message: "Enter a valid amount, source, and date (YYYY-MM-DD)." });
   }
+  const data = await Income.create({ userId: req.user._id, amount: round(parsed), source, date });
+  res.status(201).json({ success: true, data, message: "Income saved." });
 };
 
-// @desc    Update an income
-// @route   PUT /api/income/:id
-// @access  Private
 exports.updateIncome = async (req, res) => {
-  try {
-    if (!mongoose.isValidObjectId(req.params.id)) {
-      return res.status(400).json({ success: false, message: "Invalid income id" });
-    }
-    let income = await Income.findById(req.params.id);
+  if (!validId(req.params.id)) return res.status(400).json({ success: false, message: "Invalid income id." });
+  const existing = await Income.findById(req.params.id);
+  if (!existing) return res.status(404).json({ success: false, message: "Income not found." });
+  if (existing.userId !== req.user._id) return res.status(403).json({ success: false, message: "You cannot edit this income." });
 
-    if (!income) {
-      return res.status(404).json({ success: false, message: "Income not found" });
-    }
-
-    // Make sure user owns income
-    if (income.userId.toString() !== req.user._id.toString()) {
-      return res.status(401).json({ success: false, message: "Not authorized to update this income" });
-    }
-
-    const { amount, source, date } = req.body;
-    const updateFields = {};
-    if (amount !== undefined) {
-      const parsedAmount = parseFloat(amount);
-      if (isNaN(parsedAmount) || parsedAmount <= 0) {
-        return res.status(400).json({ success: false, message: "Amount must be greater than 0" });
-      }
-      updateFields.amount = parsedAmount;
-    }
-    if (source !== undefined) updateFields.source = source;
-    if (date !== undefined) updateFields.date = date;
-
-    income = await Income.findByIdAndUpdate(req.params.id, updateFields, {
-      new: true,
-      runValidators: true,
-    });
-
-    res.status(200).json({ success: true, data: income, message: "Income updated successfully" });
-  } catch (error) {
-    console.error("Update Income Error:", error.message);
-    res.status(500).json({ success: false, message: "Server Error" });
+  const fields = {};
+  if (req.body.amount !== undefined) {
+    const n = Number(req.body.amount);
+    if (!Number.isFinite(n) || n <= 0) return res.status(400).json({ success: false, message: "Amount must be greater than 0." });
+    fields.amount = round(n);
   }
+  if (req.body.source !== undefined) {
+    if (!SOURCES.includes(req.body.source)) return res.status(400).json({ success: false, message: `Source must be one of: ${SOURCES.join(", ")}` });
+    fields.source = req.body.source;
+  }
+  if (req.body.date !== undefined) {
+    if (!isValidDate(req.body.date)) return res.status(400).json({ success: false, message: "Date must be YYYY-MM-DD." });
+    fields.date = req.body.date;
+  }
+  if (!Object.keys(fields).length) return res.status(400).json({ success: false, message: "Nothing to update." });
+
+  res.json({ success: true, data: await Income.update(req.params.id, fields), message: "Income updated." });
 };
 
-// @desc    Delete an income
-// @route   DELETE /api/income/:id
-// @access  Private
 exports.deleteIncome = async (req, res) => {
-  try {
-    if (!mongoose.isValidObjectId(req.params.id)) {
-      return res.status(400).json({ success: false, message: "Invalid income id" });
-    }
-    const income = await Income.findById(req.params.id);
-
-    if (!income) {
-      return res.status(404).json({ success: false, message: "Income not found" });
-    }
-
-    // Make sure user owns income
-    if (income.userId.toString() !== req.user._id.toString()) {
-      return res.status(401).json({ success: false, message: "Not authorized to delete this income" });
-    }
-
-    await income.deleteOne();
-
-    res.status(200).json({ success: true, data: {}, message: "Income deleted successfully" });
-  } catch (error) {
-    console.error("Delete Income Error:", error.message);
-    res.status(500).json({ success: false, message: "Server Error" });
-  }
+  if (!validId(req.params.id)) return res.status(400).json({ success: false, message: "Invalid income id." });
+  const existing = await Income.findById(req.params.id);
+  if (!existing) return res.status(404).json({ success: false, message: "Income not found." });
+  if (existing.userId !== req.user._id) return res.status(403).json({ success: false, message: "You cannot delete this income." });
+  Income.remove(req.params.id);
+  res.json({ success: true, data: {}, message: "Income deleted." });
 };

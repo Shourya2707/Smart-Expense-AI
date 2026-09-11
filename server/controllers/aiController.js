@@ -1,286 +1,156 @@
-const Expense = require("../models/Expense");
-const Income = require("../models/Income");
+const Groq = require("groq-sdk").default || require("groq-sdk");
+const { env } = require("../config/env");
+const ChatMessage = require("../models/ChatMessage");
+const AiEvent = require("../models/AiEvent");
+const { runAgent } = require("../services/ai/agent");
+const { getInsights } = require("../services/ai/insights");
+const { CATEGORIES } = require("../services/analyticsService");
 
-// Helper to extract JSON from AI text response safely
-const extractJSON = (text) => {
-  if (!text) return null;
-  let cleaned = text.trim();
-
-  // Strip standard markdown fences
-  if (cleaned.startsWith("```")) {
-    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-  }
-
-  // Try direct parse
+function extractJSON(text) {
   try {
-    return JSON.parse(cleaned);
+    return JSON.parse(text.replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim());
   } catch {
-    // If direct parse fails, find opening and closing array or object
-    const firstBracket = cleaned.search(/[{\[]/);
-    const lastBracket = Math.max(cleaned.lastIndexOf("}"), cleaned.lastIndexOf("]"));
-    if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
-      try {
-        const candidate = cleaned.slice(firstBracket, lastBracket + 1);
-        return JSON.parse(candidate);
-      } catch {
-        return null;
-      }
+    const start = text.search(/[\[{]/);
+    const end = Math.max(text.lastIndexOf("}"), text.lastIndexOf("]"));
+    try {
+      return start >= 0 ? JSON.parse(text.slice(start, end + 1)) : null;
+    } catch {
+      return null;
     }
-    return null;
+  }
+}
+
+/** POST /api/ai/chat — SSE stream: tool runs, answer tokens, then done. */
+exports.chat = async (req, res) => {
+  const message = typeof req.body.message === "string" ? req.body.message.trim().slice(0, 500) : "";
+  const sessionId = typeof req.body.sessionId === "string" ? req.body.sessionId.slice(0, 40) : "default";
+  if (!message) return res.status(400).json({ success: false, message: "Message is required." });
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  const send = (event) => res.write(`data: ${JSON.stringify(event)}\n\n`);
+  res.flushHeaders?.();
+
+  let closed = false;
+  req.on("close", () => { closed = true; });
+
+  try {
+    send({ type: "start" });
+    const history = await ChatMessage.recentForContext(req.user._id, sessionId);
+    let answer = "";
+    const finalAnswer = await runAgent({
+      userId: req.user._id,
+      userMessage: message,
+      history,
+      onEvent: (event) => {
+        if (closed) return;
+        if (event.type === "token") answer += event.text;
+        send(event);
+      },
+    });
+    const text = finalAnswer || answer || "I couldn't generate a reply. Please try again.";
+
+    ChatMessage.append(req.user._id, "user", message, sessionId);
+    const saved = ChatMessage.append(req.user._id, "assistant", text, sessionId);
+    send({ type: "done", messageId: saved._id });
+  } catch (error) {
+    console.error("Chat error:", error.message);
+    if (!closed) send({ type: "error", message: "The assistant hit an error. Please try again." });
+  } finally {
+    if (!closed) res.end();
   }
 };
 
-// @desc    Get rule-based spending insights (fallback)
-// @route   GET /api/ai/insights
-// @access  Private
+/** GET /api/ai/chat/history */
+exports.chatHistory = async (req, res) => {
+  const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId.slice(0, 40) : "default";
+  res.json({ success: true, data: await ChatMessage.list(req.user._id, sessionId, 50) });
+};
+
+/** POST /api/ai/chat/reset */
+exports.chatReset = async (req, res) => {
+  const sessionId = typeof req.body?.sessionId === "string" ? req.body.sessionId.slice(0, 40) : "default";
+  ChatMessage.clear(req.user._id, sessionId);
+  res.json({ success: true, message: "Conversation cleared." });
+};
+
+/** GET /api/ai/insights */
 exports.getInsights = async (req, res) => {
   try {
-    const userId = req.user._id;
-    const expenses = await Expense.find({ userId });
-    const incomes = await Income.find({ userId });
-
-    const totalExpenses = expenses.reduce((acc, curr) => acc + curr.amount, 0);
-    const totalIncome = incomes.reduce((acc, curr) => acc + curr.amount, 0);
-    const savings = totalIncome - totalExpenses;
-    const savingsRate = totalIncome > 0 ? (savings / totalIncome) * 100 : 0;
-
-    const categoryMap = {};
-    expenses.forEach((exp) => {
-      categoryMap[exp.category] = (categoryMap[exp.category] || 0) + exp.amount;
-    });
-
-    const topCategory = Object.entries(categoryMap).sort((a, b) => b[1] - a[1])[0];
-    const insights = [];
-
-    if (expenses.length === 0 && incomes.length === 0) {
-      insights.push({
-        type: "info",
-        title: "Get Started",
-        message: "Add your first income and expense to unlock personalized AI insights.",
-      });
-    } else {
-      if (savingsRate >= 20) {
-        insights.push({
-          type: "success",
-          title: "Great Savings Habit",
-          message: `You're saving ${savingsRate.toFixed(1)}% of your income. Keep it up!`,
-        });
-      } else if (savingsRate < 0) {
-        insights.push({
-          type: "warning",
-          title: "Overspending Alert",
-          message: `Your expenses exceed income by ₹${Math.abs(savings).toFixed(2)}. Review your spending.`,
-        });
-      } else {
-        insights.push({
-          type: "info",
-          title: "Savings Opportunity",
-          message: `Your savings rate is ${savingsRate.toFixed(1)}%. Try to reach 20% for better financial health.`,
-        });
-      }
-
-      if (topCategory) {
-        const [category, amount] = topCategory;
-        const percentage = totalExpenses > 0 ? (amount / totalExpenses) * 100 : 0;
-        insights.push({
-          type: "info",
-          title: "Top Spending Category",
-          message: `${category} accounts for ${percentage.toFixed(1)}% (₹${amount.toFixed(2)}) of your expenses.`,
-        });
-
-        if (percentage > 40) {
-          insights.push({
-            type: "warning",
-            title: "Category Concentration",
-            message: `Consider reducing ${category} spending — it is over 40% of your total expenses.`,
-          });
-        }
-      }
-
-      const avgExpense = expenses.length > 0 ? totalExpenses / expenses.length : 0;
-      insights.push({
-        type: "info",
-        title: "Spending Pattern",
-        message: `Average expense: ₹${avgExpense.toFixed(2)} across ${expenses.length} transactions.`,
-      });
-    }
-
-    res.status(200).json({ success: true, data: insights });
+    const { insights, source } = await getInsights(req.user._id);
+    res.json({ success: true, data: insights, source });
   } catch (error) {
-    console.error("AI Insights Error:", error.message);
+    console.error("Insights error:", error.message);
     res.status(500).json({ success: false, message: "Server Error" });
   }
 };
 
-// @desc    Get Gemini AI-powered insights
-// @route   GET /api/ai/gemini-insights
-// @access  Private
-exports.getGeminiInsights = async (req, res) => {
-  try {
-    const apiKey = process.env.GEMINI_API_KEY;
-
-    // If no Gemini key, fall back to rule-based insights
-    if (!apiKey) {
-      return exports.getInsights(req, res);
-    }
-
-    const userId = req.user._id;
-    const expenses = await Expense.find({ userId }).sort({ date: -1 }).limit(100);
-    const incomes = await Income.find({ userId }).sort({ date: -1 }).limit(100);
-
-    const totalExpenses = expenses.reduce((acc, curr) => acc + curr.amount, 0);
-    const totalIncome = incomes.reduce((acc, curr) => acc + curr.amount, 0);
-
-    // Build category summary
-    const categoryMap = {};
-    expenses.forEach((exp) => {
-      categoryMap[exp.category] = (categoryMap[exp.category] || 0) + exp.amount;
-    });
-
-    // Build source summary
-    const sourceMap = {};
-    incomes.forEach((inc) => {
-      sourceMap[inc.source] = (sourceMap[inc.source] || 0) + inc.amount;
-    });
-
-    const financialSummary = `
-User Financial Summary:
-- Total Income: ₹${totalIncome.toFixed(2)} from ${incomes.length} records
-- Total Expenses: ₹${totalExpenses.toFixed(2)} from ${expenses.length} records
-- Net Savings: ₹${(totalIncome - totalExpenses).toFixed(2)}
-- Savings Rate: ${totalIncome > 0 ? (((totalIncome - totalExpenses) / totalIncome) * 100).toFixed(1) : 0}%
-
-Expense Breakdown by Category:
-${Object.entries(categoryMap).map(([cat, amt]) => `  - ${cat}: ₹${amt.toFixed(2)}`).join("\n")}
-
-Income Sources:
-${Object.entries(sourceMap).map(([src, amt]) => `  - ${src}: ₹${amt.toFixed(2)}`).join("\n")}
-
-Recent Expenses (last 5):
-${expenses.slice(0, 5).map((e) => `  - ${e.description}: ₹${e.amount.toFixed(2)} (${e.category}, ${new Date(e.date).toLocaleDateString()})`).join("\n")}
-    `.trim();
-
-    const { GoogleGenerativeAI } = require("@google/generative-ai");
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
-    const prompt = `You are an elite personal finance AI advisor. Analyze this financial summary and provide 3-5 actionable insights. Each insight must have: type ("success", "warning", or "info"), a short title, and a concise message (1-2 sentences max).
-
-${financialSummary}
-
-Respond ONLY with a valid JSON array of objects with keys: type, title, message. Do not include markdown formatting or code blocks.
-Example format: [{"type":"info","title":"Example","message":"Example message."}]`;
-
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
-
-    const insights = extractJSON(responseText);
-
-    if (!Array.isArray(insights)) {
-      return exports.getInsights(req, res);
-    }
-
-    // Validate structure
-    const validInsights = insights.filter(
-      (i) => i.type && i.title && i.message && ["success", "warning", "info"].includes(i.type)
-    );
-
-    if (validInsights.length === 0) {
-      return exports.getInsights(req, res);
-    }
-
-    res.status(200).json({ success: true, data: validInsights, source: "gemini" });
-  } catch (error) {
-    console.error("Gemini Insights Error:", error.message);
-    return exports.getInsights(req, res);
-  }
-};
-
-// @desc    Analyze receipt image with Gemini Vision
-// @route   POST /api/ai/scan-receipt
-// @access  Private
+/** POST /api/ai/scan-receipt — vision model reads merchant/amount/date/category. */
 exports.scanReceipt = async (req, res) => {
+  if (!req.file) return res.status(400).json({ success: false, message: "Choose a receipt image first." });
+  if (!env.groqApiKey) return res.status(503).json({ success: false, message: "Receipt AI needs GROQ_API_KEY in the server environment." });
+
+  const started = Date.now();
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-
-    if (!apiKey) {
-      return res.status(400).json({
-        success: false,
-        message: "AI receipt scanning is not configured. Please add GEMINI_API_KEY to the server environment.",
-      });
-    }
-
-    if (!req.file) {
-      return res.status(400).json({ success: false, message: "No image file uploaded" });
-    }
-
-    // Validate file type
-    const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/heic"];
-    if (!allowedTypes.includes(req.file.mimetype)) {
-      return res.status(400).json({ success: false, message: "Invalid file type. Please upload a JPEG, PNG, or WebP image." });
-    }
-
-    const { GoogleGenerativeAI } = require("@google/generative-ai");
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
-    // Convert file buffer to base64
-    const base64Image = req.file.buffer.toString("base64");
-
-    const prompt = `Analyze this receipt image carefully and extract the following information. If a field cannot be determined, use reasonable defaults.
-
-Return ONLY a valid JSON object with these keys:
-- merchant: the store or business name (string)
-- amount: the total amount paid (number, digits only)
-- date: the date on the receipt in YYYY-MM-DD format (string)
-- category: classify into exactly one of: Food, Travel, Shopping, Bills, Entertainment, Health, Education, Others (string)
-- description: a brief description of the purchase (string)
-- items: an array of line items if visible, each with name and price (array of objects)
-
-Do not include markdown code fences. Just the raw JSON object.`;
-
-    const result = await model.generateContent([
-      prompt,
+    const groq = new Groq({ apiKey: env.groqApiKey });
+    const content = [
       {
-        inlineData: {
-          data: base64Image,
-          mimeType: req.file.mimetype,
-        },
+        type: "text",
+        text: `Read this receipt and return JSON only with merchant, amount, date (YYYY-MM-DD), category (one of ${CATEGORIES.join(", ")}), description, and items (array of {name, price}). Use null when unreadable.`,
       },
-    ]);
+      { type: "image_url", image_url: { url: `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}` } },
+    ];
+    const response = await groq.chat.completions.create({
+      model: env.groqVisionModel,
+      temperature: 0,
+      max_tokens: 600,
+      response_format: { type: "json_object" },
+      messages: [{ role: "user", content }],
+    });
+    const usage = response.usage || {};
+    logAiEvent(req, { feature: "receipt", latencyMs: Date.now() - started, usage, success: true });
 
-    const responseText = result.response.text();
-    const receiptData = extractJSON(responseText);
-
-    if (!receiptData || typeof receiptData !== "object") {
-      throw new Error("Could not parse receipt data from AI output");
+    const raw = extractJSON(response.choices[0]?.message?.content || "{}");
+    const amount = Number(raw?.amount);
+    const category = CATEGORIES.find((item) => item.toLowerCase() === String(raw?.category).toLowerCase()) || "Others";
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(422).json({ success: false, message: "The receipt amount could not be read. Try a clearer image." });
     }
-
-    // Normalize category case-insensitively
-    const validCategories = ["Food", "Travel", "Shopping", "Bills", "Entertainment", "Health", "Education", "Others"];
-    const matchedCategory = validCategories.find(
-      (cat) => cat.toLowerCase() === (receiptData.category || "").toLowerCase()
-    ) || "Others";
-
-    const extracted = {
-      merchant: receiptData.merchant || "",
-      amount: typeof receiptData.amount === "number" ? receiptData.amount : parseFloat(receiptData.amount) || 0,
-      date: receiptData.date || new Date().toISOString().split("T")[0],
-      category: matchedCategory,
-      description: receiptData.description || receiptData.merchant || "Receipt Expense",
-      items: Array.isArray(receiptData.items) ? receiptData.items : [],
-    };
-
-    res.status(200).json({
+    res.json({
       success: true,
-      data: extracted,
-      message: "Receipt analyzed successfully. Please review and confirm the details.",
+      data: {
+        merchant: raw.merchant || "",
+        amount,
+        date: /^\d{4}-\d{2}-\d{2}$/.test(raw.date) ? raw.date : new Date().toISOString().slice(0, 10),
+        category,
+        description: raw.description || raw.merchant || "Receipt expense",
+        items: Array.isArray(raw.items) ? raw.items : [],
+      },
+      message: "Receipt parsed. Review the fields before saving.",
     });
   } catch (error) {
-    console.error("Scan Receipt Error:", error.message);
-    res.status(500).json({
-      success: false,
-      message: "Failed to analyze receipt. Please try again or enter the details manually.",
-    });
+    logAiEvent(req, { feature: "receipt", latencyMs: Date.now() - started, success: false, error: error.message });
+    console.error("Receipt scan error:", error.message);
+    res.status(502).json({ success: false, message: "Groq could not read this receipt. Try a sharper, well-lit image." });
   }
 };
+
+function logAiEvent(req, { feature, latencyMs, usage = {}, success, error = null }) {
+  try {
+    AiEvent.insert({
+      userId: req.user?._id ?? null,
+      feature,
+      model: env.groqVisionModel,
+      promptTokens: usage.prompt_tokens ?? null,
+      completionTokens: usage.completion_tokens ?? null,
+      totalTokens: usage.total_tokens ?? null,
+      latencyMs,
+      success,
+      error,
+    });
+  } catch { /* telemetry must never break the request */ }
+}

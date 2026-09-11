@@ -1,24 +1,298 @@
-import { Link, useNavigate } from "react-router-dom";
-import { ArrowUpRight, Check, ChevronRight, CircleDollarSign, LockKeyhole, ScanLine, Sparkles, TrendingUp, WalletCards } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Zap, ArrowRight, ShieldCheck, TrendingUp, ScanLine, Layers, CheckCircle2 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { formatCurrency } from "../utils/formatters";
 
-const features = [
-  [ScanLine, "Receipt intelligence", "Turn paper receipts into clean, categorized transactions in seconds.", "Vision AI"],
-  [TrendingUp, "A calmer cashflow", "See what is coming in, what is leaving, and what deserves your attention.", "Live insights"],
-  [WalletCards, "One clear ledger", "Income, expenses, and savings goals — connected in one considered workspace.", "Everything in one place"],
-];
-
-export default function Home() {
-  const navigate = useNavigate();
+const Home = () => {
   const { isAuthenticated } = useAuth();
-  const start = () => navigate(isAuthenticated ? "/dashboard" : "/signup");
-  return <div className="landing-shell">
-    <div className="ambient ambient-one" /><div className="ambient ambient-two" />
-    <header className="landing-nav"><Link to="/" className="brand"><span className="brand-mark"><Sparkles size={17} /></span><span>SmartExpense <em>AI</em></span></Link><div className="nav-actions">{isAuthenticated ? <Link className="button button-primary button-small" to="/dashboard">Open workspace <ChevronRight size={15} /></Link> : <><Link className="nav-link" to="/login">Sign in</Link><button className="button button-primary button-small" onClick={start}>Get started <ArrowUpRight size={15} /></button></>}</div></header>
-    <main>
-      <section className="hero-section"><div className="eyebrow"><span className="live-dot" /> Your financial life, made legible</div><h1>Clarity for every<br /><span>spending decision.</span></h1><p className="hero-copy">SmartExpense turns everyday money into a calm, intelligent picture — so you can move through your month with confidence.</p><div className="hero-actions"><button className="button button-primary button-large" onClick={start}>Start for free <ArrowUpRight size={17} /></button><Link className="button button-quiet button-large" to="/login">I already have an account</Link></div><div className="trust-row"><span><Check size={14} /> No credit card</span><span><LockKeyhole size={14} /> Private by design</span><span><CircleDollarSign size={14} /> Built for real life</span></div></section>
-      <section className="product-stage" aria-label="SmartExpense product preview"><div className="stage-glow" /><div className="preview-window"><div className="preview-top"><div className="window-dots"><i /><i /><i /></div><span>Overview</span><span className="preview-secure"><LockKeyhole size={12} /> Private workspace</span></div><div className="preview-content"><div className="preview-heading"><div><small>Tuesday, September 02</small><h2>Good morning, Alex</h2></div><div className="preview-avatar">AS</div></div><div className="metric-grid"><div className="metric-card metric-highlight"><small>Available balance</small><strong>$12,840.24</strong><span className="positive"><ArrowUpRight size={13} /> 8.4% this month</span><div className="sparkline"><i /><i /><i /><i /><i /><i /><i /><i /><i /></div></div><div className="metric-card"><small>Monthly inflow</small><strong>$8,250.00</strong><span className="muted">Across 3 income streams</span></div><div className="metric-card"><small>Monthly outflow</small><strong>$3,420.18</strong><span className="muted">12% below your average</span></div></div><div className="preview-lower"><div className="activity-card"><div className="card-title"><span>Recent activity</span><span className="muted">View all</span></div>{[["Whole Foods Market","Groceries","-$84.20"],["Acme Studio","Salary · Sep 01","+$4,250.00"],["Spotify","Subscriptions","-$10.99"]].map(([title,sub,amount]) => <div className="activity-row" key={title}><span className="activity-icon"><WalletCards size={15} /></span><span><b>{title}</b><small>{sub}</small></span><strong className={amount[0] === "+" ? "positive" : ""}>{amount}</strong></div>)}</div><div className="insight-card"><div className="insight-icon"><Sparkles size={15} /></div><small>Smart insight</small><b>You are on track to save<br />$1,120 more this month.</b><span>Based on your last 90 days <ArrowUpRight size={13} /></span></div></div></div></div></section>
-      <section className="feature-section"><div className="section-kicker">Designed around your attention</div><h2>Less noise. More knowing.</h2><p className="section-copy">The details are there when you need them, and out of the way when you don't.</p><div className="feature-grid">{features.map(([Icon,title,copy,badge]) => <article className="feature-card" key={title}><div className="feature-icon"><Icon size={19} /></div><span className="feature-badge">{badge}</span><h3>{title}</h3><p>{copy}</p></article>)}</div></section>
-    </main><footer className="landing-footer"><span>© {new Date().getFullYear()} SmartExpense AI</span><span>Financial clarity, quietly delivered.</span></footer>
-  </div>;
-}
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "var(--bg)" }}>
+      {/* Top navigation */}
+      <header style={{
+        height: "64px",
+        borderBottom: "1px solid var(--border)",
+        background: "rgba(255, 255, 255, 0.88)",
+        backdropFilter: "blur(12px)",
+        position: "sticky",
+        top: 0,
+        zIndex: 40,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "0 28px",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{
+            width: "32px",
+            height: "32px",
+            borderRadius: "8px",
+            background: "var(--ink)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "white",
+          }}>
+            <Zap size={17} />
+          </div>
+          <span style={{ fontSize: "17px", fontWeight: "700", letterSpacing: "-0.02em" }}>
+            SmartExpense<span style={{ color: "var(--ink-4)", fontWeight: "500", marginLeft: "2px" }}>AI</span>
+          </span>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          {isAuthenticated ? (
+            <Link to="/dashboard" className="btn btn-primary" style={{ height: "36px", padding: "0 16px" }}>
+              Open Dashboard <ArrowRight size={14} />
+            </Link>
+          ) : (
+            <>
+              <Link to="/login" className="btn btn-ghost" style={{ height: "36px", padding: "0 14px" }}>
+                Sign In
+              </Link>
+              <Link to="/signup" className="btn btn-primary" style={{ height: "36px", padding: "0 16px" }}>
+                Get Started
+              </Link>
+            </>
+          )}
+        </div>
+      </header>
+
+      {/* Hero Section */}
+      <main style={{ flex: 1 }}>
+        <section style={{
+          maxWidth: "1100px",
+          margin: "0 auto",
+          padding: "80px 24px 60px",
+          textAlign: "center",
+        }}>
+          {/* Subtle status chip */}
+          <div style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "7px",
+            padding: "4px 12px",
+            borderRadius: "999px",
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            fontSize: "12px",
+            fontWeight: "600",
+            color: "var(--ink-2)",
+            marginBottom: "28px",
+            boxShadow: "var(--shadow-xs)",
+          }}>
+            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--fin-green)" }} />
+            Zero-Slop Financial Accounting System v2.0
+          </div>
+
+          <h1 style={{
+            fontSize: "clamp(36px, 5.5vw, 58px)",
+            fontWeight: "800",
+            letterSpacing: "-0.035em",
+            lineHeight: 1.12,
+            color: "var(--ink)",
+            maxWidth: "840px",
+            margin: "0 auto 20px",
+          }}>
+            Personal finance with mathematical clarity.
+          </h1>
+
+          <p style={{
+            fontSize: "clamp(16px, 2vw, 19px)",
+            color: "var(--ink-3)",
+            maxWidth: "640px",
+            margin: "0 auto 36px",
+            lineHeight: 1.6,
+          }}>
+            Track every rupee across accounts, categorize cashflows in milliseconds, and extract receipts with vision models—free from bloated distractions.
+          </p>
+
+          {/* Action CTAs */}
+          <div style={{ display: "flex", justifyContent: "center", gap: "14px", flexWrap: "wrap", marginBottom: "60px" }}>
+            <Link
+              to={isAuthenticated ? "/dashboard" : "/signup"}
+              className="btn btn-primary"
+              style={{ height: "46px", padding: "0 24px", fontSize: "15px" }}
+            >
+              {isAuthenticated ? "Go to Dashboard" : "Start Tracking Free"} <ArrowRight size={16} />
+            </Link>
+            <Link
+              to="/login"
+              className="btn btn-secondary"
+              style={{ height: "46px", padding: "0 22px", fontSize: "15px" }}
+            >
+              View Live Demo
+            </Link>
+          </div>
+
+          {/* Interactive Preview Mockup Card */}
+          <div className="card" style={{
+            maxWidth: "920px",
+            margin: "0 auto",
+            padding: "24px",
+            background: "var(--surface)",
+            textAlign: "left",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border-sm)", paddingBottom: "16px", marginBottom: "20px" }}>
+              <div>
+                <span className="section-label">Aggregated Portfolio Liquidity</span>
+                <div style={{ display: "flex", alignItems: "baseline", gap: "12px", marginTop: "4px" }}>
+                  <span className="metric-value" style={{ fontSize: "32px" }}>{formatCurrency(142850)}</span>
+                  <span className="badge badge-green">+14.2% this month</span>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <span className="badge">INR Core</span>
+                <span className="badge badge-green" style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                  <ShieldCheck size={12} /> Verified
+                </span>
+              </div>
+            </div>
+
+            {/* Sample Table Preview */}
+            <div style={{ overflowX: "auto" }}>
+              <table className="data-table" style={{ background: "transparent" }}>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>Category / Source</th>
+                    <th style={{ textAlign: "right" }}>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style={{ color: "var(--ink-3)", fontFamily: "monospace" }}>11 Sep 2026</td>
+                    <td style={{ fontWeight: "600" }}>Monthly Tech Retainer</td>
+                    <td><span className="badge badge-green">Salary &amp; Retainer</span></td>
+                    <td style={{ textAlign: "right", color: "var(--fin-green)", fontWeight: "600" }}>+ ₹1,20,000.00</td>
+                  </tr>
+                  <tr>
+                    <td style={{ color: "var(--ink-3)", fontFamily: "monospace" }}>10 Sep 2026</td>
+                    <td style={{ fontWeight: "600" }}>Cloud Server Infrastructure</td>
+                    <td><span className="badge">Bills &amp; Ops</span></td>
+                    <td style={{ textAlign: "right", color: "var(--fin-red)", fontWeight: "600" }}>- ₹4,890.00</td>
+                  </tr>
+                  <tr>
+                    <td style={{ color: "var(--ink-3)", fontFamily: "monospace" }}>08 Sep 2026</td>
+                    <td style={{ fontWeight: "600" }}>Client Working Lunch</td>
+                    <td><span className="badge">Food &amp; Dining</span></td>
+                    <td style={{ textAlign: "right", color: "var(--fin-red)", fontWeight: "600" }}>- ₹1,650.00</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        {/* Pillars / Feature Grid */}
+        <section style={{
+          maxWidth: "1100px",
+          margin: "0 auto",
+          padding: "40px 24px 80px",
+        }}>
+          <div style={{ textAlign: "center", marginBottom: "48px" }}>
+            <span className="section-label">Engineering Discipline</span>
+            <h2 style={{ fontSize: "28px", fontWeight: "700", color: "var(--ink)", marginTop: "6px" }}>
+              Built for speed, confidence, and auditability
+            </h2>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "20px" }}>
+            <div className="card" style={{ padding: "26px" }}>
+              <div style={{
+                width: "40px",
+                height: "40px",
+                borderRadius: "10px",
+                background: "var(--bg-subtle)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "var(--ink)",
+                marginBottom: "18px",
+              }}>
+                <TrendingUp size={20} />
+              </div>
+              <h3 style={{ fontSize: "16px", fontWeight: "700", color: "var(--ink)", marginBottom: "8px" }}>
+                Zero AI Slop Design
+              </h3>
+              <p style={{ fontSize: "13.5px", color: "var(--ink-3)", lineHeight: 1.6 }}>
+                No neon gradients, no chatty conversational bots, and no bloated dashboards. Pure high-density financial data designed for clarity.
+              </p>
+            </div>
+
+            <div className="card" style={{ padding: "26px" }}>
+              <div style={{
+                width: "40px",
+                height: "40px",
+                borderRadius: "10px",
+                background: "var(--bg-subtle)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "var(--ink)",
+                marginBottom: "18px",
+              }}>
+                <ScanLine size={20} />
+              </div>
+              <h3 style={{ fontSize: "16px", fontWeight: "700", color: "var(--ink)", marginBottom: "8px" }}>
+                Autonomous Receipt Parsing
+              </h3>
+              <p style={{ fontSize: "13.5px", color: "var(--ink-3)", lineHeight: 1.6 }}>
+                Drop any receipt or invoice. Vision AI extracts merchant, items, taxes, date, and category in seconds with mechanical verification.
+              </p>
+            </div>
+
+            <div className="card" style={{ padding: "26px" }}>
+              <div style={{
+                width: "40px",
+                height: "40px",
+                borderRadius: "10px",
+                background: "var(--bg-subtle)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "var(--ink)",
+                marginBottom: "18px",
+              }}>
+                <Layers size={20} />
+              </div>
+              <h3 style={{ fontSize: "16px", fontWeight: "700", color: "var(--ink)", marginBottom: "8px" }}>
+                Ledger-Grade Precision
+              </h3>
+              <p style={{ fontSize: "13.5px", color: "var(--ink-3)", lineHeight: 1.6 }}>
+                Full inline editing, category filtering, instant sorting, and monthly cashflow aggregation calibrated for the Indian Rupee (₹).
+              </p>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      {/* Minimal footer */}
+      <footer style={{
+        borderTop: "1px solid var(--border)",
+        background: "var(--surface)",
+        padding: "24px 28px",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        flexWrap: "wrap",
+        gap: "16px",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: "var(--ink-3)" }}>
+          <span>SmartExpense AI</span>
+          <span>•</span>
+          <span>Light-only Fintech System</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "16px", fontSize: "13px", color: "var(--ink-3)" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+            <CheckCircle2 size={13} style={{ color: "var(--fin-green)" }} /> TLS 1.3 Encrypted
+          </span>
+          <span>© 2026 SmartExpense AI</span>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+export default Home;

@@ -1,13 +1,27 @@
-import { useState, useRef, useEffect } from "react";
-import {
-  Upload, Scan, AlertTriangle, FileText, Sparkles, RefreshCw, Save,
-} from "lucide-react";
+import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  UploadCloud,
+  ScanLine,
+  CheckCircle2,
+  AlertCircle,
+  Receipt,
+  X,
+} from "lucide-react";
 import API from "../services/api";
 import { useToast } from "../context/ToastContext";
-import { formatInputDate } from "../utils/formatters";
+import { formatCurrency, formatInputDate } from "../utils/formatters";
 
-const CATEGORIES = ["Food", "Travel", "Shopping", "Bills", "Entertainment", "Health", "Education", "Others"];
+const CATEGORIES = [
+  "Food",
+  "Travel",
+  "Shopping",
+  "Bills",
+  "Entertainment",
+  "Health",
+  "Education",
+  "Others",
+];
 
 const ReceiptScanner = () => {
   const navigate = useNavigate();
@@ -16,383 +30,386 @@ const ReceiptScanner = () => {
 
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [extractedData, setExtractedData] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-  }, [previewUrl]);
+  // Extracted verified data form
+  const [scannedData, setScannedData] = useState(null);
+  const [verifiedForm, setVerifiedForm] = useState({
+    description: "",
+    amount: "",
+    category: "Food",
+    date: formatInputDate(new Date()),
+  });
+  const [isSaving, setIsSaving] = useState(false);
 
-  const handleFileSelect = (e) => {
-    const file = e.target.files[0];
+  // File handling
+  const handleFileSelect = (file) => {
     if (!file) return;
-    setError("");
-
+    if (!file.type.startsWith("image/")) {
+      setError("Please select a valid image file (PNG, JPG, or WebP).");
+      return;
+    }
     if (file.size > 5 * 1024 * 1024) {
-      setError("File is too large. Please upload an image smaller than 5MB.");
-      toast.error("File exceeds 5MB limit");
+      setError("Receipt image must be under 5MB.");
       return;
     }
-    const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/heic"];
-    if (!allowedTypes.includes(file.type)) {
-      setError("Invalid file type. Please upload a JPEG, PNG, or WebP image.");
-      toast.error("Invalid image format");
-      return;
-    }
-    setSelectedFile(file);
-    setPreviewUrl((previousUrl) => {
-      if (previousUrl) URL.revokeObjectURL(previousUrl);
-      return URL.createObjectURL(file);
-    });
-    setExtractedData(null);
-  };
 
-  const handleAnalyzeReceipt = async () => {
-    if (!selectedFile) return;
-    setAnalyzing(true);
     setError("");
-    const formData = new FormData();
-    formData.append("receipt", selectedFile);
-    try {
-      const { data } = await API.post("/api/ai/scan-receipt", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      if (data.success && data.data) {
-        setExtractedData({
-          amount: data.data.amount || "",
-          category: data.data.category || "Food",
-          description: data.data.description || data.data.merchant || "Receipt expense",
-          date: formatInputDate(data.data.date),
-          merchant: data.data.merchant || "",
-        });
-        toast.success("Receipt analyzed successfully! Review details below.");
-      }
-    } catch (err) {
-      console.error("Receipt Analysis Error:", err);
-      const errMsg = err.response?.data?.message || "Failed to analyze receipt. You can still enter details manually.";
-      setError(errMsg);
-      toast.error(errMsg);
-      setExtractedData({ amount: "", category: "Food", description: "", date: formatInputDate(), merchant: "" });
-    } finally {
-      setAnalyzing(false);
-    }
+    setSelectedFile(file);
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    setScannedData(null);
   };
 
-  const handleSaveExpense = async (e) => {
+  const handleDrop = (e) => {
     e.preventDefault();
-    if (!extractedData) return;
-    const parsed = parseFloat(extractedData.amount);
-    if (!extractedData.amount || isNaN(parsed) || parsed <= 0) {
-      toast.error("Please enter a valid amount greater than 0");
-      return;
-    }
-    if (!extractedData.description) {
-      toast.error("Please provide an expense description");
-      return;
-    }
-    setSaving(true);
-    try {
-      const { data } = await API.post("/api/expenses", {
-        amount: parsed,
-        category: extractedData.category,
-        description: extractedData.description,
-        date: extractedData.date,
-      });
-      if (data.success) {
-        toast.success("Expense saved to your records!");
-        navigate("/expenses");
-      }
-    } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to save expense");
-    } finally {
-      setSaving(false);
+    setDragOver(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFileSelect(e.dataTransfer.files[0]);
     }
   };
 
-  const handleReset = () => {
+  const handleClear = () => {
     setSelectedFile(null);
-    setPreviewUrl((previousUrl) => {
-      if (previousUrl) URL.revokeObjectURL(previousUrl);
-      return null;
-    });
-    setExtractedData(null);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+    setScannedData(null);
     setError("");
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const labelClass = "block text-[11px] font-bold uppercase tracking-widest mb-1.5";
+  // Process Receipt with Groq vision model
+  const handleScan = async () => {
+    if (!selectedFile) return;
+    setScanning(true);
+    setError("");
+
+    const formData = new FormData();
+    formData.append("receipt", selectedFile);
+
+    try {
+      const { data } = await API.post("/api/ai/scan-receipt", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      if (data.success && data.data) {
+        const res = data.data;
+        setScannedData(res);
+        setVerifiedForm({
+          description: res.merchant || res.description || "Vendor Receipt",
+          amount: res.amount || "",
+          category: CATEGORIES.includes(res.category) ? res.category : "Food",
+          date: formatInputDate(res.date),
+        });
+        toast.success("Receipt parsed successfully");
+      } else {
+        setError(data.message || "Could not extract receipt fields.");
+      }
+    } catch (err) {
+      const msg =
+        err.response?.data?.message ||
+        "Failed to scan receipt. Please ensure image clarity.";
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  // Save verified expense to ledger
+  const handleSaveToExpenses = async (e) => {
+    e.preventDefault();
+    if (!verifiedForm.description || !verifiedForm.amount) {
+      toast.error("Please fill in description and amount.");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const { data } = await API.post("/api/expenses", {
+        description: verifiedForm.description.trim(),
+        amount: parseFloat(verifiedForm.amount),
+        category: verifiedForm.category,
+        date: verifiedForm.date,
+      });
+
+      if (data.success) {
+        toast.success("Receipt expense logged to ledger!");
+        navigate("/expenses");
+      }
+    } catch {
+      toast.error("Failed to save expense.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
-    <div className="app-page flex flex-col gap-6 max-w-5xl mx-auto pb-12 animate-slide-up">
+    <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="animate-fade-in">
       {/* Header */}
       <div>
-        <h1
-          className="text-2xl sm:text-[28px] font-black flex items-center gap-2.5"
-          style={{ color: "#1d1d1f", letterSpacing: "-0.03em" }}
-        >
-          <Scan size={24} style={{ color: "#4f46e5" }} />
-          Smart Receipt Scanner
+        <h1 style={{ fontSize: "24px", fontWeight: "700", letterSpacing: "-0.025em", color: "var(--ink)" }}>
+          Autonomous Receipt Scanner
         </h1>
-        <p className="text-sm mt-0.5" style={{ color: "#6e6e73" }}>
-          Upload any paper or digital receipt. Gemini Vision AI automatically extracts merchant, amount, category, and date.
+        <p style={{ fontSize: "13.5px", color: "var(--ink-3)", marginTop: "2px" }}>
+          Drop physical or digital vendor invoices. Vision models extract amounts, dates, and classifications.
         </p>
       </div>
 
-      {/* Error banner */}
       {error && (
-        <div
-          className="p-4 rounded-xl text-sm flex items-center justify-between"
-          style={{
-            background: "#fef2f2",
-            border: "1px solid rgba(220,38,38,0.2)",
-            color: "#dc2626",
-          }}
-        >
-          <span className="flex items-center gap-2">
-            <AlertTriangle size={16} className="flex-shrink-0" />
-            {error}
-          </span>
-          <button
-            onClick={() => setError("")}
-            className="text-xs underline hover:opacity-70 cursor-pointer ml-4 flex-shrink-0"
-          >
-            Dismiss
-          </button>
+        <div className="alert alert-error">
+          <AlertCircle size={15} style={{ flexShrink: 0 }} />
+          <span>{error}</span>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Left — Upload Zone */}
-        <div className="glass-card rounded-2xl p-6 flex flex-col">
-          <div className="flex-1">
-            {/* Step label */}
-            <div className="flex items-center gap-2.5 mb-4">
-              <span
-                className="w-6 h-6 rounded-full text-xs flex items-center justify-center font-bold text-white"
-                style={{ background: "#4f46e5" }}
+      {/* Two-Panel Suite */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+        gap: "24px",
+        alignItems: "start",
+      }}>
+        {/* Left Panel: Dropzone & Receipt Preview */}
+        <div className="card" style={{ padding: "24px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+            <span className="section-label">Source Document</span>
+            {selectedFile && !scanning && (
+              <button
+                onClick={handleClear}
+                className="btn btn-ghost"
+                style={{ height: "28px", padding: "0 8px", fontSize: "12px" }}
               >
-                1
-              </span>
-              <h2 className="text-[15px] font-bold" style={{ color: "#1d1d1f", letterSpacing: "-0.02em" }}>
-                Upload Receipt Image
-              </h2>
-            </div>
-
-            {!previewUrl ? (
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="receipt-dropzone border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center text-center cursor-pointer min-h-[300px] active-press group transition-colors"
-                style={{
-                  borderColor: "rgba(0,0,0,0.12)",
-                  background: "#fafafa",
-                }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = "#4f46e5"; e.currentTarget.style.background = "#f5f5ff"; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(0,0,0,0.12)"; e.currentTarget.style.background = "#fafafa"; }}
-              >
-                <div
-                  className="receipt-upload-icon w-14 h-14 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"
-                  style={{ background: "#eef2ff", color: "#4f46e5" }}
-                >
-                  <Upload size={24} />
-                </div>
-                <p className="text-sm font-bold mb-1" style={{ color: "#1d1d1f" }}>
-                  Click to select receipt
-                </p>
-                <p className="text-xs mb-5" style={{ color: "#aeaeb2" }}>PNG, JPG, or WebP up to 5MB</p>
-                <span
-                  className="receipt-browse-button px-4 py-2 rounded-xl text-xs font-semibold"
-                  style={{
-                    background: "#ffffff",
-                    color: "#6e6e73",
-                    border: "1px solid rgba(0,0,0,0.10)",
-                  }}
-                >
-                  Browse Files
-                </span>
-              </div>
-            ) : (
-              <div
-                className="receipt-preview relative rounded-2xl overflow-hidden min-h-[300px] flex items-center justify-center"
-                style={{ background: "#f5f5f7", border: "1px solid rgba(0,0,0,0.07)" }}
-              >
-                <img src={previewUrl} alt="Receipt preview" className="max-h-[320px] object-contain w-full p-3" />
-
-                {/* Scanning overlay */}
-                {analyzing && (
-                  <div
-                    className="receipt-analysis-overlay absolute inset-0 flex flex-col items-center justify-center p-6 text-center"
-                  >
-                    <div
-                      className="receipt-analysis-icon relative w-16 h-16 rounded-2xl flex items-center justify-center mb-4 overflow-hidden"
-                      style={{ background: "#eef2ff", color: "#4f46e5" }}
-                    >
-                      <Sparkles size={28} className="animate-pulse" />
-                      <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-indigo-400 to-transparent animate-radar" />
-                    </div>
-                    <p className="text-sm font-bold mb-1" style={{ color: "#1d1d1f" }}>Gemini AI Analyzing...</p>
-                    <p className="text-xs" style={{ color: "#6e6e73" }}>
-                      Extracting merchant, amount, category, and date
-                    </p>
-                  </div>
-                )}
-              </div>
+                <X size={13} /> Remove
+              </button>
             )}
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/heic"
-              onChange={handleFileSelect}
-              className="hidden"
-            />
           </div>
 
-          {/* Action buttons */}
-          {previewUrl && !extractedData && (
-            <div className="flex gap-3 mt-5">
-              <button
-                onClick={handleReset}
-                className="modal-cancel flex-1 py-3 px-4 font-semibold text-sm rounded-xl active-press cursor-pointer"
-                style={{ background: "#f5f5f7", color: "#6e6e73", border: "1px solid rgba(0,0,0,0.08)" }}
-                onMouseEnter={e => (e.currentTarget.style.background = "#ebebeb")}
-                onMouseLeave={e => (e.currentTarget.style.background = "#f5f5f7")}
-              >
-                Choose Another
-              </button>
-              <button
-                onClick={handleAnalyzeReceipt}
-                disabled={analyzing}
-                className="modal-primary flex-1 py-3 px-4 text-white font-semibold text-sm rounded-xl shadow-sm shadow-indigo-500/20 active-press disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
-                style={{ background: "#4f46e5" }}
-                onMouseEnter={e => !analyzing && (e.currentTarget.style.background = "#3730a3")}
-                onMouseLeave={e => !analyzing && (e.currentTarget.style.background = "#4f46e5")}
-              >
-                {analyzing ? "Processing..." : <><Sparkles size={15} /> Analyze with AI</>}
-              </button>
-            </div>
-          )}
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={(e) => handleFileSelect(e.target.files[0])}
+            accept="image/png, image/jpeg, image/webp"
+            style={{ display: "none" }}
+          />
 
-          {extractedData && (
-            <button
-              onClick={handleReset}
-              className="modal-cancel mt-5 py-2.5 px-4 font-semibold text-sm rounded-xl active-press flex items-center justify-center gap-2 cursor-pointer"
-              style={{ background: "#f5f5f7", color: "#6e6e73", border: "1px solid rgba(0,0,0,0.08)" }}
-              onMouseEnter={e => (e.currentTarget.style.background = "#ebebeb")}
-              onMouseLeave={e => (e.currentTarget.style.background = "#f5f5f7")}
-            >
-              <RefreshCw size={14} /> Scan Another Receipt
-            </button>
-          )}
-        </div>
-
-        {/* Right — Review Form */}
-        <div className="glass-card rounded-2xl p-6 flex flex-col">
-          <div className="flex items-center gap-2.5 mb-4">
-            <span
-              className="w-6 h-6 rounded-full text-xs flex items-center justify-center font-bold text-white"
-              style={{ background: extractedData ? "#059669" : "#aeaeb2" }}
-            >
-              2
-            </span>
-            <h2 className="text-[15px] font-bold" style={{ color: "#1d1d1f", letterSpacing: "-0.02em" }}>
-              Review Extracted Details
-            </h2>
-          </div>
-
-          {!extractedData ? (
+          {!previewUrl ? (
             <div
-              className="flex-1 flex flex-col items-center justify-center text-center p-6 rounded-xl min-h-[300px]"
-              style={{ border: "1.5px dashed rgba(0,0,0,0.10)" }}
+              className={`dropzone ${dragOver ? "drag-over" : ""}`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                height: "300px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "32px 20px",
+                textAlign: "center",
+              }}
             >
-              <FileText size={36} className="mb-3" style={{ color: "#e5e5ea" }} />
-              <p className="text-sm font-semibold mb-1.5" style={{ color: "#1d1d1f" }}>
-                No receipt data extracted yet
-              </p>
-              <p className="text-xs max-w-xs" style={{ color: "#aeaeb2" }}>
-                Upload an image on the left and click "Analyze with AI" to populate this form automatically.
+              <div style={{
+                width: "48px",
+                height: "48px",
+                borderRadius: "12px",
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "var(--ink)",
+                marginBottom: "14px",
+                boxShadow: "var(--shadow-xs)",
+              }}>
+                <UploadCloud size={24} />
+              </div>
+              <h3 style={{ fontSize: "14px", fontWeight: "600", color: "var(--ink)", marginBottom: "4px" }}>
+                Click to upload or drag &amp; drop
+              </h3>
+              <p style={{ fontSize: "12.5px", color: "var(--ink-4)", maxWidth: "260px", lineHeight: 1.4 }}>
+                Supports PNG, JPEG, WebP up to 5MB. Clear vendor slips yield optimal extraction.
               </p>
             </div>
           ) : (
-            <form onSubmit={handleSaveExpense} className="flex flex-col flex-1 space-y-4">
-              {/* AI notice */}
-              <div
-                className="p-3 rounded-xl text-xs flex items-start gap-2"
-                style={{ background: "#eef2ff", color: "#4f46e5", border: "1px solid rgba(79,70,229,0.15)" }}
-              >
-                <Sparkles size={14} className="shrink-0 mt-0.5" />
-                <span>AI extracted the information below. Review and adjust before saving.</span>
-              </div>
+            <div style={{ position: "relative", borderRadius: "var(--r-md)", overflow: "hidden", border: "1px solid var(--border)", background: "#0f172a" }}>
+              <img
+                src={previewUrl}
+                alt="Receipt preview"
+                style={{
+                  width: "100%",
+                  maxHeight: "360px",
+                  objectFit: "contain",
+                  display: "block",
+                  opacity: scanning ? 0.75 : 1,
+                }}
+              />
+              {/* Mechanical laser scanning line */}
+              {scanning && <div className="laser-line" />}
+            </div>
+          )}
 
-              {/* Description */}
+          {/* Action Trigger */}
+          <div style={{ marginTop: "20px" }}>
+            <button
+              onClick={handleScan}
+              disabled={!selectedFile || scanning}
+              className="btn btn-primary"
+              style={{ width: "100%", height: "42px" }}
+            >
+              {scanning ? (
+                <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span className="spinner spinner-white" />
+                  Running Vision Analysis...
+                </span>
+              ) : (
+                <span style={{ display: "flex", alignItems: "center", gap: "7px" }}>
+                  <ScanLine size={16} /> Extract Receipt Data
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Right Panel: Extraction Results & Verification Form */}
+        <div className="card" style={{ padding: "24px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "18px" }}>
+            <span className="section-label">Verified Data Output</span>
+            {scannedData && (
+              <span className="badge badge-green" style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                <CheckCircle2 size={12} /> Extracted
+              </span>
+            )}
+          </div>
+
+          {scanning ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "12px 0" }}>
+              <div className="skeleton" style={{ height: "40px" }} />
+              <div className="skeleton" style={{ height: "40px" }} />
+              <div className="skeleton" style={{ height: "40px" }} />
+              <div className="skeleton" style={{ height: "100px" }} />
+            </div>
+          ) : scannedData ? (
+            <form onSubmit={handleSaveToExpenses} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              {/* Description / Merchant */}
               <div>
-                <label className={labelClass} style={{ color: "#aeaeb2" }}>Description / Merchant</label>
+                <label className="label" htmlFor="rec-desc">Merchant / Vendor</label>
                 <input
+                  id="rec-desc"
                   type="text"
-                  value={extractedData.description}
-                  onChange={(e) => setExtractedData({ ...extractedData, description: e.target.value })}
-                  className="w-full glass-input px-4 py-3 rounded-xl text-sm"
-                  style={{ color: "#1d1d1f" }}
-                  placeholder="e.g. Target Supermarket"
                   required
+                  className="input"
+                  value={verifiedForm.description}
+                  onChange={(e) => setVerifiedForm({ ...verifiedForm, description: e.target.value })}
                 />
               </div>
 
               {/* Amount */}
               <div>
-                <label className={labelClass} style={{ color: "#aeaeb2" }}>Total Amount (₹)</label>
+                <label className="label" htmlFor="rec-amount">Extracted Total (₹)</label>
                 <input
+                  id="rec-amount"
                   type="number"
-                  step="0.01"
-                  value={extractedData.amount}
-                  onChange={(e) => setExtractedData({ ...extractedData, amount: e.target.value })}
-                  className="w-full glass-input px-4 py-3 rounded-xl font-mono text-base font-bold"
-                  style={{ color: "#1d1d1f" }}
-                  placeholder="0.00"
+                  step="any"
                   required
+                  className="input font-mono"
+                  style={{ fontSize: "16px", fontWeight: "700" }}
+                  value={verifiedForm.amount}
+                  onChange={(e) => setVerifiedForm({ ...verifiedForm, amount: e.target.value })}
                 />
               </div>
 
-              {/* Category */}
-              <div>
-                <label className={labelClass} style={{ color: "#aeaeb2" }}>Category</label>
-                <select
-                  value={extractedData.category}
-                  onChange={(e) => setExtractedData({ ...extractedData, category: e.target.value })}
-                  className="w-full glass-input px-4 py-3 rounded-xl text-sm cursor-pointer"
-                  style={{ color: "#1d1d1f" }}
+              {/* Grid: Category & Date */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                <div>
+                  <label className="label" htmlFor="rec-cat">Category</label>
+                  <select
+                    id="rec-cat"
+                    className="input"
+                    value={verifiedForm.category}
+                    onChange={(e) => setVerifiedForm({ ...verifiedForm, category: e.target.value })}
+                  >
+                    {CATEGORIES.map((cat) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label" htmlFor="rec-date">Date</label>
+                  <input
+                    id="rec-date"
+                    type="date"
+                    required
+                    className="input"
+                    value={verifiedForm.date}
+                    onChange={(e) => setVerifiedForm({ ...verifiedForm, date: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              {/* Line items if extracted */}
+              {scannedData.items && scannedData.items.length > 0 && (
+                <div style={{ background: "var(--bg-subtle)", padding: "12px 14px", borderRadius: "var(--r-sm)", border: "1px solid var(--border)" }}>
+                  <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--ink-3)", display: "block", marginBottom: "8px" }}>
+                    Detected Line Items
+                  </span>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    {scannedData.items.map((it, idx) => (
+                      <div key={idx} style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
+                        <span style={{ color: "var(--ink-2)" }}>{it.name || it.item || "Item"}</span>
+                        <span className="font-mono" style={{ color: "var(--ink)", fontWeight: "600" }}>
+                          {formatCurrency(it.price || it.amount || 0)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  className="btn btn-secondary"
+                  style={{ flex: 1 }}
                 >
-                  {CATEGORIES.map((cat) => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
+                  Scan Another
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  style={{ flex: 2 }}
+                  disabled={isSaving}
+                >
+                  {isSaving ? (
+                    <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span className="spinner spinner-white" /> Saving...
+                    </span>
+                  ) : (
+                    <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <CheckCircle2 size={15} /> Log to Expenses
+                    </span>
+                  )}
+                </button>
               </div>
-
-              {/* Date */}
-              <div>
-                <label className={labelClass} style={{ color: "#aeaeb2" }}>Receipt Date</label>
-                <input
-                  type="date"
-                  value={extractedData.date}
-                  onChange={(e) => setExtractedData({ ...extractedData, date: e.target.value })}
-                  className="w-full glass-input px-4 py-3 rounded-xl text-sm"
-                  style={{ color: "#1d1d1f" }}
-                  required
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={saving}
-                className="modal-income w-full py-3.5 px-4 mt-auto text-white font-semibold text-sm rounded-xl shadow-sm shadow-emerald-500/20 active-press disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
-                style={{ background: "#059669" }}
-                onMouseEnter={e => !saving && (e.currentTarget.style.background = "#047857")}
-                onMouseLeave={e => !saving && (e.currentTarget.style.background = "#059669")}
-              >
-                {saving ? "Saving Record..." : <><Save size={15} /><span>Confirm & Save Expense</span></>}
-              </button>
             </form>
+          ) : (
+            <div className="empty-state" style={{ height: "300px" }}>
+              <Receipt size={32} style={{ marginBottom: "10px", opacity: 0.4 }} />
+              <h4 style={{ fontSize: "14px", fontWeight: "600", color: "var(--ink)", marginBottom: "4px" }}>
+                Awaiting receipt ingestion
+              </h4>
+              <p style={{ fontSize: "12.5px", color: "var(--ink-3)", maxWidth: "240px" }}>
+                Select or drag a receipt on the left to extract invoice totals and vendor fields.
+              </p>
+            </div>
           )}
         </div>
       </div>

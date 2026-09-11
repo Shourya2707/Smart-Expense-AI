@@ -1,109 +1,111 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard,
-  Receipt,
-  Wallet,
-  LineChart,
-  Scan,
-  User,
-  LogOut,
-  X,
-  Sparkles,
+  LayoutDashboard, Receipt, Wallet, LineChart, ScanLine, User, LogOut, X, Zap, Shield,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 
-const Sidebar = ({ isMobileOpen, onCloseMobile }) => {
+const NAV = [
+  { path: "/dashboard",       label: "Dashboard",        Icon: LayoutDashboard },
+  { path: "/expenses",        label: "Expenses",         Icon: Receipt },
+  { path: "/income",          label: "Income",           Icon: Wallet },
+  { path: "/analytics",       label: "Analytics",        Icon: LineChart },
+  { path: "/receipt-scanner", label: "Receipt Scanner",  Icon: ScanLine },
+  { path: "/profile",         label: "Profile",          Icon: User },
+];
+
+const Sidebar = ({ mobileOpen, onCloseMobile }) => {
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const toast = useToast();
 
   const handleLogout = () => {
     logout();
-    toast.info("Logged out successfully");
+    toast.info("Signed out.");
     navigate("/login");
   };
 
-  const navItems = [
-    { name: "Dashboard", path: "/dashboard", icon: <LayoutDashboard size={18} /> },
-    { name: "Expenses", path: "/expenses", icon: <Receipt size={18} /> },
-    { name: "Income", path: "/income", icon: <Wallet size={18} /> },
-    { name: "Analytics", path: "/analytics", icon: <LineChart size={18} /> },
-    { name: "Receipt Scanner", path: "/receipt-scanner", icon: <Scan size={18} /> },
-    { name: "Profile", path: "/profile", icon: <User size={18} /> },
-  ];
-
-  const sidebarContent = (
-    <aside className="app-sidebar-inner h-full flex flex-col justify-between py-5 select-none">
-      <div>
-        {/* Brand Header */}
-        <div className="app-brand-row flex items-center justify-between mb-7 px-4">
-          <NavLink
-            to="/dashboard"
-            onClick={onCloseMobile}
-            className="app-brand flex items-center gap-2.5 group active-press"
-          >
-            <div className="brand-mark w-9 h-9 rounded-xl flex items-center justify-center text-white shadow-sm group-hover:scale-105 transition-transform">
-              <Sparkles size={17} />
-            </div>
-            <div className="flex flex-col leading-none">
-              <span className="app-brand-name text-[14px] font-extrabold tracking-tight">
-                SmartExpense
-              </span>
-              <span className="app-brand-subtitle text-[10px] font-semibold tracking-wider uppercase mt-0.5">
-                AI Financial OS
-              </span>
-            </div>
-          </NavLink>
-
-          {/* Mobile close button */}
-          {onCloseMobile && (
-            <button
-              onClick={onCloseMobile}
-              className="app-icon-button md:hidden p-1.5 rounded-xl active-press cursor-pointer"
-              title="Close menu"
-              aria-label="Close menu"
-            >
-              <X size={18} />
-            </button>
-          )}
-        </div>
-
-        {/* Section Label */}
-        <div className="px-4 mb-2">
-          <span className="app-section-label text-[10px] font-bold uppercase tracking-widest">Navigation</span>
-        </div>
-
-        {/* Navigation Items */}
-        <nav className="px-2 space-y-0.5" aria-label="Main Navigation">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.name}
-              to={item.path}
-              onClick={onCloseMobile}
-              className={({ isActive }) =>
-                `app-nav-link flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-[13.5px] transition-all duration-150 active-press ${
-                  isActive
-                    ? "is-active font-semibold"
-                    : ""
-                }`
-              }
-            >
-              <span className="shrink-0 opacity-90">{item.icon}</span>
-              <span>{item.name}</span>
-            </NavLink>
-          ))}
-        </nav>
+  const Content = () => (
+    <aside style={{
+      height: "100%",
+      display: "flex",
+      flexDirection: "column",
+      padding: "20px 12px",
+      gap: 0,
+      background: "var(--surface)",
+      overflowY: "auto",
+    }}>
+      {/* Brand */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24, padding: "0 4px" }}>
+        <NavLink to="/dashboard" onClick={onCloseMobile} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
+          <div style={{
+            width: 32, height: 32, borderRadius: 8,
+            background: "var(--brand)", color: "white",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0, boxShadow: "var(--shadow-sm)",
+          }}>
+            <Zap size={16} />
+          </div>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)", lineHeight: 1.2, letterSpacing: "-0.01em" }}>SmartExpense</div>
+            <div style={{ fontSize: 9.5, fontWeight: 600, color: "var(--ink-4)", textTransform: "uppercase", letterSpacing: "0.07em", lineHeight: 1 }}>AI Workspace</div>
+          </div>
+        </NavLink>
+        {onCloseMobile && (
+          <button onClick={onCloseMobile} className="btn-icon" style={{ display: "flex", marginLeft: 8 }} aria-label="Close">
+            <X size={16} />
+          </button>
+        )}
       </div>
 
-      {/* Logout */}
-      <div className="app-sidebar-footer px-2 pt-4">
+      {/* Nav label */}
+      <div className="section-label" style={{ padding: "0 6px", marginBottom: 6 }}>Navigation</div>
+
+      {/* Nav items */}
+      <nav style={{ display: "flex", flexDirection: "column", gap: 2 }} aria-label="Main navigation">
+        {NAV.map(({ path, label, Icon }) => (
+          <NavLink
+            key={path}
+            to={path}
+            onClick={onCloseMobile}
+            className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+          >
+            <Icon size={16} style={{ flexShrink: 0, opacity: 0.85 }} />
+            <span>{label}</span>
+          </NavLink>
+        ))}
+        {user?.isAdmin && (
+          <NavLink
+            to="/admin"
+            onClick={onCloseMobile}
+            className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+          >
+            <Shield size={16} style={{ flexShrink: 0, opacity: 0.85 }} />
+            <span>Observability</span>
+          </NavLink>
+        )}
+      </nav>
+
+      {/* Spacer */}
+      <div style={{ flex: 1 }} />
+
+      {/* Sign out */}
+      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
         <button
           onClick={handleLogout}
-          className="app-signout flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-[13.5px] font-medium transition-all duration-150 active-press cursor-pointer"
+          className="nav-link"
+          style={{ width: "100%", background: "none", border: "none", cursor: "pointer", color: "var(--ink-2)" }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = "var(--fin-red)";
+            e.currentTarget.style.background = "var(--fin-red-bg)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = "var(--ink-2)";
+            e.currentTarget.style.background = "transparent";
+          }}
         >
-          <LogOut size={17} className="shrink-0" />
-          <span>Sign Out</span>
+          <LogOut size={16} style={{ flexShrink: 0 }} />
+          Sign Out
         </button>
       </div>
     </aside>
@@ -111,32 +113,47 @@ const Sidebar = ({ isMobileOpen, onCloseMobile }) => {
 
   return (
     <>
-      {/* Desktop Sidebar */}
-      <div
-        className="app-sidebar h-full hidden md:flex flex-col shrink-0 z-20"
-        style={{
-          background: "transparent",
-          borderRight: "0",
-        }}
-      >
-        {sidebarContent}
+      {/* Desktop */}
+      <div style={{
+        width: 220,
+        flexShrink: 0,
+        height: "100%",
+        borderRight: "1px solid var(--border)",
+        background: "var(--surface)",
+        display: "none",
+      }} className="sidebar-desktop">
+        <Content />
       </div>
 
-      {/* Mobile Drawer */}
-      {isMobileOpen && (
-        <div className="fixed inset-0 z-50 md:hidden flex">
+      {/* Mobile drawer */}
+      {mobileOpen && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 50,
+          display: "flex",
+        }}>
           <div
-            className="app-mobile-scrim fixed inset-0 transition-opacity duration-200"
+            style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.28)", backdropFilter: "blur(3px)" }}
             onClick={onCloseMobile}
-            aria-hidden="true"
+            aria-hidden
           />
-          <div
-            className="app-sidebar relative w-64 max-w-[82vw] h-full z-10 shadow-2xl animate-slide-up"
+          <div style={{
+            position: "relative", width: 240, maxWidth: "80vw",
+            height: "100%", zIndex: 10,
+            background: "var(--surface)",
+            borderRight: "1px solid var(--border)",
+            boxShadow: "4px 0 24px rgba(15,23,42,0.10)",
+          }}
+            className="animate-slide-right"
           >
-            {sidebarContent}
+            <Content />
           </div>
         </div>
       )}
+
+      {/* Force desktop show via style tag */}
+      <style>{`
+        @media (min-width: 768px) { .sidebar-desktop { display: block !important; } }
+      `}</style>
     </>
   );
 };

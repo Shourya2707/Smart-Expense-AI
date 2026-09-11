@@ -1,50 +1,70 @@
-import { useState, useEffect } from "react";
-import { User, Mail, Key, ShieldCheck, LogOut, Save, Lock } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useState } from "react";
+import {
+  User,
+  Shield,
+  Sliders,
+  Cpu,
+  LogOut,
+  CheckCircle2,
+  AlertCircle,
+  Lock,
+  Mail,
+  Calendar,
+} from "lucide-react";
 import API from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { formatDate } from "../utils/formatters";
 
 const Profile = () => {
-  const navigate = useNavigate();
   const { user, updateUser, logout } = useAuth();
   const toast = useToast();
 
-  const [profile, setProfile] = useState({
-    fullName: user?.fullName || "",
-    email: user?.email || "",
-    createdAt: user?.createdAt || "",
-  });
+  const [activeTab, setActiveTab] = useState("workspace"); // workspace | security | preferences | usage
 
-  const [passwordData, setPasswordData] = useState({
+  // Workspace form
+  const [fullName, setFullName] = useState(user?.fullName || "");
+  const [savingName, setSavingName] = useState(false);
+
+  // Security form
+  const [passwords, setPasswords] = useState({
     currentPassword: "",
     newPassword: "",
-    confirmNewPassword: "",
+    confirmPassword: "",
+  });
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [securityError, setSecurityError] = useState("");
+
+  // Preferences (snappy toggles)
+  const [preferences, setPreferences] = useState({
+    emailDigest: true,
+    anomalyAlerts: true,
+    soundFeedback: false,
+    strictRounding: true,
   });
 
-  const [savingName, setSavingName] = useState(false);
-  const [savingPassword, setSavingPassword] = useState(false);
+  const togglePref = (key) => {
+    setPreferences((prev) => {
+      const updated = { ...prev, [key]: !prev[key] };
+      toast.info(`Updated preference`);
+      return updated;
+    });
+  };
 
-  useEffect(() => {
-    if (user) {
-      setProfile({
-        fullName: user.fullName || "",
-        email: user.email || "",
-        createdAt: user.createdAt || "",
-      });
-    }
-  }, [user]);
-
+  // Update profile full name
   const handleUpdateName = async (e) => {
     e.preventDefault();
-    if (!profile.fullName.trim()) { toast.error("Full name cannot be empty"); return; }
+    if (!fullName.trim()) {
+      toast.error("Full name cannot be empty");
+      return;
+    }
+
     setSavingName(true);
     try {
-      const { data } = await API.put("/api/auth/profile", { fullName: profile.fullName });
+      const { data } = await API.put("/api/auth/profile", { fullName: fullName.trim() });
       if (data.success) {
-        toast.success("Profile name updated successfully!");
-        updateUser({ fullName: data.user.fullName });
+        updateUser({ fullName: fullName.trim() });
+        toast.success("Profile name updated successfully");
       }
     } catch (err) {
       toast.error(err.response?.data?.message || "Failed to update profile name");
@@ -53,217 +73,365 @@ const Profile = () => {
     }
   };
 
+  // Change password
   const handleChangePassword = async (e) => {
     e.preventDefault();
-    const { currentPassword, newPassword, confirmNewPassword } = passwordData;
-    if (!currentPassword || !newPassword || !confirmNewPassword) { toast.error("Please fill out all password fields"); return; }
-    if (newPassword.length < 8) { toast.error("New password must be at least 8 characters"); return; }
-    if (newPassword !== confirmNewPassword) { toast.error("New passwords do not match"); return; }
+    setSecurityError("");
+
+    if (!passwords.currentPassword || !passwords.newPassword) {
+      setSecurityError("Please fill in both current and new password.");
+      return;
+    }
+    if (passwords.newPassword.length < 6) {
+      setSecurityError("New password must be at least 6 characters.");
+      return;
+    }
+    if (passwords.newPassword !== passwords.confirmPassword) {
+      setSecurityError("New passwords do not match.");
+      return;
+    }
+
     setSavingPassword(true);
     try {
-      const { data } = await API.put("/api/auth/profile", { currentPassword, newPassword });
+      const { data } = await API.put("/api/auth/profile", {
+        currentPassword: passwords.currentPassword,
+        newPassword: passwords.newPassword,
+      });
+
       if (data.success) {
-        toast.success("Password changed successfully!");
-        setPasswordData({ currentPassword: "", newPassword: "", confirmNewPassword: "" });
+        toast.success("Password changed successfully");
+        setPasswords({ currentPassword: "", newPassword: "", confirmPassword: "" });
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Password update failed");
+      const msg = err.response?.data?.message || "Failed to update password. Check current password.";
+      setSecurityError(msg);
+      toast.error(msg);
     } finally {
       setSavingPassword(false);
     }
   };
 
-  const handleLogout = () => {
-    logout();
-    toast.info("Logged out successfully");
-    navigate("/login");
-  };
-
-  const getInitials = (name) => {
-    if (!name) return "U";
-    return name.split(" ").map((p) => p[0]).join("").toUpperCase().slice(0, 2);
-  };
-
-  const labelClass = "block text-[11px] font-bold uppercase tracking-widest mb-1.5";
-
   return (
-    <div className="app-page flex flex-col gap-6 max-w-4xl mx-auto pb-12 animate-slide-up">
+    <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="animate-fade-in">
       {/* Header */}
       <div>
-        <h1
-          className="text-2xl sm:text-[28px] font-black flex items-center gap-2.5"
-          style={{ color: "#1d1d1f", letterSpacing: "-0.03em" }}
-        >
-          <User size={24} style={{ color: "#4f46e5" }} />
-          Account & Security
+        <h1 style={{ fontSize: "24px", fontWeight: "700", letterSpacing: "-0.025em", color: "var(--ink)" }}>
+          Settings &amp; Workspace
         </h1>
-        <p className="text-sm mt-0.5" style={{ color: "#6e6e73" }}>
-          Manage your personal details, email credentials, and security settings.
+        <p style={{ fontSize: "13.5px", color: "var(--ink-3)", marginTop: "2px" }}>
+          Manage your account identity, encryption credentials, and system preferences
         </p>
       </div>
 
-      {/* Identity Card */}
-      <div
-        className="glass-card rounded-2xl p-6 sm:p-7 flex flex-col sm:flex-row items-center justify-between gap-6"
-        style={{ border: "1px solid rgba(79,70,229,0.12)" }}
-      >
-        <div className="flex flex-col sm:flex-row items-center gap-5 text-center sm:text-left">
-          {/* Avatar */}
-          <div
-            className="w-20 h-20 rounded-2xl flex items-center justify-center text-2xl font-black text-white shadow-md shadow-indigo-500/15 flex-shrink-0"
-            style={{
-              background: "linear-gradient(135deg, #4f46e5 0%, #818cf8 100%)",
-            }}
-          >
-            {getInitials(profile.fullName)}
-          </div>
-
-          <div>
-            <h2
-              className="text-xl sm:text-2xl font-extrabold"
-              style={{ color: "#1d1d1f", letterSpacing: "-0.025em" }}
-            >
-              {profile.fullName || "User Account"}
-            </h2>
-            <p
-              className="text-xs mt-1 flex items-center justify-center sm:justify-start gap-1.5 font-mono"
-              style={{ color: "#6e6e73" }}
-            >
-              <Mail size={12} />
-              {profile.email}
-            </p>
-            <div className="flex items-center justify-center sm:justify-start gap-3 mt-3 flex-wrap">
-              <span
-                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold"
-                style={{ background: "#f0fdf4", color: "#059669", border: "1px solid rgba(5,150,105,0.2)" }}
-              >
-                <ShieldCheck size={11} /> Active Account
-              </span>
-              {profile.createdAt && (
-                <span className="text-[11px] font-mono" style={{ color: "#aeaeb2" }}>
-                  Member since {formatDate(profile.createdAt)}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <button
-          onClick={handleLogout}
-          className="profile-signout px-5 py-2.5 rounded-xl text-sm font-semibold active-press flex items-center gap-2 cursor-pointer flex-shrink-0"
-          style={{ background: "#fef2f2", color: "#dc2626", border: "1px solid rgba(220,38,38,0.2)" }}
-          onMouseEnter={e => (e.currentTarget.style.background = "#fee2e2")}
-          onMouseLeave={e => (e.currentTarget.style.background = "#fef2f2")}
-        >
-          <LogOut size={15} />
-          <span>Sign Out</span>
-        </button>
-      </div>
-
-      {/* Forms Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {/* Personal Info */}
-        <div className="glass-card rounded-2xl p-6 flex flex-col">
-          <h3
-            className="text-[15px] font-bold mb-5 flex items-center gap-2"
-            style={{ color: "#1d1d1f", letterSpacing: "-0.02em" }}
-          >
-            <User size={17} style={{ color: "#4f46e5" }} />
-            Personal Information
-          </h3>
-
-          <form onSubmit={handleUpdateName} className="space-y-4 flex-1 flex flex-col">
-            <div>
-              <label className={labelClass} style={{ color: "#aeaeb2" }}>Full Name</label>
-              <input
-                type="text"
-                value={profile.fullName}
-                onChange={(e) => setProfile({ ...profile, fullName: e.target.value })}
-                className="w-full glass-input px-4 py-3 rounded-xl text-sm"
-                style={{ color: "#1d1d1f" }}
-                placeholder="Your Name"
-                required
-              />
-            </div>
-
-            <div>
-              <label className={labelClass} style={{ color: "#aeaeb2" }}>Registered Email</label>
-              <input
-                type="email"
-                value={profile.email}
-                disabled
-                className="w-full px-4 py-3 rounded-xl text-sm font-mono cursor-not-allowed"
-                style={{
-                  background: "#f5f5f7",
-                  border: "1px solid rgba(0,0,0,0.07)",
-                  color: "#aeaeb2",
-                }}
-              />
-              <p className="text-[11px] mt-1.5" style={{ color: "#aeaeb2" }}>
-                Email is locked for account integrity and recovery security.
-              </p>
-            </div>
-
+      {/* Main Settings Split: Navigation List & Detail Panel */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr)) 2.5fr",
+        gap: "24px",
+        alignItems: "start",
+      }}>
+        {/* Left Nav List */}
+        <div className="card" style={{ padding: "12px" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <button
-              type="submit"
-              disabled={savingName}
-              className="app-action-primary w-full py-3 px-4 mt-auto text-white font-semibold text-sm rounded-xl shadow-sm shadow-indigo-500/20 active-press disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
-              style={{ background: "#4f46e5" }}
-              onMouseEnter={e => !savingName && (e.currentTarget.style.background = "#3730a3")}
-              onMouseLeave={e => !savingName && (e.currentTarget.style.background = "#4f46e5")}
+              onClick={() => setActiveTab("workspace")}
+              className={`tab-btn ${activeTab === "workspace" ? "active" : ""}`}
             >
-              {savingName ? "Updating..." : <><Save size={15} /><span>Update Name</span></>}
+              <User size={16} />
+              <span>Workspace &amp; Identity</span>
             </button>
-          </form>
+            <button
+              onClick={() => setActiveTab("security")}
+              className={`tab-btn ${activeTab === "security" ? "active" : ""}`}
+            >
+              <Shield size={16} />
+              <span>Security &amp; Credentials</span>
+            </button>
+            <button
+              onClick={() => setActiveTab("preferences")}
+              className={`tab-btn ${activeTab === "preferences" ? "active" : ""}`}
+            >
+              <Sliders size={16} />
+              <span>Telemetry &amp; Alerts</span>
+            </button>
+            <button
+              onClick={() => setActiveTab("usage")}
+              className={`tab-btn ${activeTab === "usage" ? "active" : ""}`}
+            >
+              <Cpu size={16} />
+              <span>AI Engine &amp; Usage</span>
+            </button>
+          </div>
+
+          <div className="divider" style={{ margin: "14px 0" }} />
+
+          <button
+            onClick={logout}
+            className="tab-btn"
+            style={{ color: "var(--fin-red)" }}
+          >
+            <LogOut size={16} />
+            <span>Sign Out</span>
+          </button>
         </div>
 
-        {/* Security & Password */}
-        <div className="glass-card rounded-2xl p-6 flex flex-col">
-          <h3
-            className="text-[15px] font-bold mb-5 flex items-center gap-2"
-            style={{ color: "#1d1d1f", letterSpacing: "-0.02em" }}
-          >
-            <Key size={17} style={{ color: "#d97706" }} />
-            Security & Password
-          </h3>
+        {/* Right Detail Panel */}
+        <div className="card" style={{ padding: "28px" }}>
+          {/* TAB 1: WORKSPACE */}
+          {activeTab === "workspace" && (
+            <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: "22px" }}>
+              <div>
+                <h2 style={{ fontSize: "17px", fontWeight: "700", color: "var(--ink)" }}>
+                  Workspace Identity
+                </h2>
+                <p style={{ fontSize: "13px", color: "var(--ink-3)", marginTop: "2px" }}>
+                  Your primary profile details across financial reports and exports.
+                </p>
+              </div>
 
-          <form onSubmit={handleChangePassword} className="space-y-4 flex-1 flex flex-col">
-            {[
-              { label: "Current Password", name: "currentPassword", placeholder: "••••••••" },
-              { label: "New Password", name: "newPassword", placeholder: "Min 8 characters" },
-              { label: "Confirm New Password", name: "confirmNewPassword", placeholder: "••••••••" },
-            ].map((field) => (
-              <div key={field.name}>
-                <label className={labelClass} style={{ color: "#aeaeb2" }}>{field.label}</label>
-                <div className="relative">
+              <form onSubmit={handleUpdateName} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                <div>
+                  <label className="label" htmlFor="fullName">Full Name</label>
                   <input
-                    type="password"
-                    value={passwordData[field.name]}
-                    onChange={(e) => setPasswordData({ ...passwordData, [field.name]: e.target.value })}
-                    className="w-full glass-input px-4 py-3 pl-10 rounded-xl text-sm"
-                    style={{ color: "#1d1d1f" }}
-                    placeholder={field.placeholder}
+                    id="fullName"
+                    type="text"
+                    required
+                    className="input"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
                   />
-                  <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "#aeaeb2" }} />
+                </div>
+
+                <div>
+                  <label className="label">Registered Email</label>
+                  <div style={{ position: "relative" }}>
+                    <input
+                      type="email"
+                      readOnly
+                      disabled
+                      className="input"
+                      style={{ background: "var(--bg-subtle)", color: "var(--ink-3)", paddingLeft: "36px" }}
+                      value={user?.email || ""}
+                    />
+                    <Mail size={14} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "var(--ink-4)" }} />
+                  </div>
+                  <p className="helper-text">Email address is tied to your cryptographic ledger authentication.</p>
+                </div>
+
+                <div>
+                  <label className="label">Member Since</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: "var(--ink-2)", padding: "8px 12px", background: "var(--bg-subtle)", borderRadius: "var(--r-sm)", border: "1px solid var(--border)" }}>
+                    <Calendar size={14} style={{ color: "var(--ink-3)" }} />
+                    <span>{formatDate(user?.createdAt || new Date())}</span>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={savingName || fullName === user?.fullName}
+                  >
+                    {savingName ? "Saving..." : "Save Changes"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* TAB 2: SECURITY */}
+          {activeTab === "security" && (
+            <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: "22px" }}>
+              <div>
+                <h2 style={{ fontSize: "17px", fontWeight: "700", color: "var(--ink)" }}>
+                  Security &amp; Credentials
+                </h2>
+                <p style={{ fontSize: "13px", color: "var(--ink-3)", marginTop: "2px" }}>
+                  Update your authentication key and manage access credentials.
+                </p>
+              </div>
+
+              {securityError && (
+                <div className="alert alert-error">
+                  <AlertCircle size={15} style={{ flexShrink: 0 }} />
+                  <span>{securityError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleChangePassword} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                <div>
+                  <label className="label" htmlFor="cur-pass">Current Password</label>
+                  <div style={{ position: "relative" }}>
+                    <input
+                      id="cur-pass"
+                      type="password"
+                      required
+                      className="input"
+                      style={{ paddingLeft: "36px" }}
+                      value={passwords.currentPassword}
+                      onChange={(e) => setPasswords({ ...passwords, currentPassword: e.target.value })}
+                    />
+                    <Lock size={14} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "var(--ink-4)" }} />
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                  <div>
+                    <label className="label" htmlFor="new-pass">New Password</label>
+                    <input
+                      id="new-pass"
+                      type="password"
+                      required
+                      className="input"
+                      value={passwords.newPassword}
+                      onChange={(e) => setPasswords({ ...passwords, newPassword: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="label" htmlFor="conf-pass">Confirm Password</label>
+                    <input
+                      id="conf-pass"
+                      type="password"
+                      required
+                      className="input"
+                      value={passwords.confirmPassword}
+                      onChange={(e) => setPasswords({ ...passwords, confirmPassword: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={savingPassword}
+                  >
+                    {savingPassword ? "Updating..." : "Update Password"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* TAB 3: PREFERENCES & TOGGLES */}
+          {activeTab === "preferences" && (
+            <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: "22px" }}>
+              <div>
+                <h2 style={{ fontSize: "17px", fontWeight: "700", color: "var(--ink)" }}>
+                  Telemetry &amp; Alerts
+                </h2>
+                <p style={{ fontSize: "13px", color: "var(--ink-3)", marginTop: "2px" }}>
+                  Configure notification thresholds and accounting precision.
+                </p>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                {/* Toggle Item 1 */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "var(--bg-subtle)", borderRadius: "var(--r-md)", border: "1px solid var(--border)" }}>
+                  <div>
+                    <h4 style={{ fontSize: "13.5px", fontWeight: "600", color: "var(--ink)" }}>
+                      Weekly Financial Summary Digest
+                    </h4>
+                    <p style={{ fontSize: "12px", color: "var(--ink-3)", marginTop: "2px" }}>
+                      Send an encrypted weekly cashflow digest every Monday morning.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => togglePref("emailDigest")}
+                    className={`toggle ${preferences.emailDigest ? "is-on" : ""}`}
+                    aria-label="Toggle weekly digest"
+                  >
+                    <div className="thumb" />
+                  </button>
+                </div>
+
+                {/* Toggle Item 2 */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "var(--bg-subtle)", borderRadius: "var(--r-md)", border: "1px solid var(--border)" }}>
+                  <div>
+                    <h4 style={{ fontSize: "13.5px", fontWeight: "600", color: "var(--ink)" }}>
+                      Anomaly &amp; Spike Alerts
+                    </h4>
+                    <p style={{ fontSize: "12px", color: "var(--ink-3)", marginTop: "2px" }}>
+                      Surface high-priority notices whenever an expense exceeds ₹5,000 or category baseline by 40%.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => togglePref("anomalyAlerts")}
+                    className={`toggle ${preferences.anomalyAlerts ? "is-on" : ""}`}
+                    aria-label="Toggle anomaly alerts"
+                  >
+                    <div className="thumb" />
+                  </button>
+                </div>
+
+                {/* Toggle Item 3 */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "var(--bg-subtle)", borderRadius: "var(--r-md)", border: "1px solid var(--border)" }}>
+                  <div>
+                    <h4 style={{ fontSize: "13.5px", fontWeight: "600", color: "var(--ink)" }}>
+                      Strict Ledger Rounding
+                    </h4>
+                    <p style={{ fontSize: "12px", color: "var(--ink-3)", marginTop: "2px" }}>
+                      Enforce two decimal digits (₹.00) precision on all ledger columns and exports.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => togglePref("strictRounding")}
+                    className={`toggle ${preferences.strictRounding ? "is-on" : ""}`}
+                    aria-label="Toggle strict rounding"
+                  >
+                    <div className="thumb" />
+                  </button>
                 </div>
               </div>
-            ))}
+            </div>
+          )}
 
-            <button
-              type="submit"
-              disabled={savingPassword}
-              className="profile-password-submit w-full py-3 px-4 mt-auto font-semibold text-sm rounded-xl active-press disabled:opacity-50 cursor-pointer"
-              style={{
-                background: "#f5f5f7",
-                color: "#1d1d1f",
-                border: "1px solid rgba(0,0,0,0.10)",
-              }}
-              onMouseEnter={e => !savingPassword && (e.currentTarget.style.background = "#ebebeb")}
-              onMouseLeave={e => !savingPassword && (e.currentTarget.style.background = "#f5f5f7")}
-            >
-              {savingPassword ? "Updating Password..." : "Change Password"}
-            </button>
-          </form>
+          {/* TAB 4: USAGE & AI ENGINE */}
+          {activeTab === "usage" && (
+            <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: "22px" }}>
+              <div>
+                <h2 style={{ fontSize: "17px", fontWeight: "700", color: "var(--ink)" }}>
+                  AI Engine &amp; Telemetry
+                </h2>
+                <p style={{ fontSize: "13px", color: "var(--ink-3)", marginTop: "2px" }}>
+                  Status of underlying vision models and database telemetry.
+                </p>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
+                <div style={{ padding: "14px", background: "var(--bg-subtle)", borderRadius: "var(--r-sm)", border: "1px solid var(--border)" }}>
+                  <span className="section-label">Vision Parsing Engine</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "6px" }}>
+                    <CheckCircle2 size={15} style={{ color: "var(--fin-green)" }} />
+                    <span style={{ fontSize: "14px", fontWeight: "600", color: "var(--ink)" }}>Groq Llama (LangChain agent)</span>
+                  </div>
+                  <span style={{ fontSize: "11.5px", color: "var(--ink-3)", marginTop: "4px", display: "block" }}>
+                    Sub-second invoice extraction
+                  </span>
+                </div>
+
+                <div style={{ padding: "14px", background: "var(--bg-subtle)", borderRadius: "var(--r-sm)", border: "1px solid var(--border)" }}>
+                  <span className="section-label">Account Tier</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "6px" }}>
+                    <span className="badge badge-green">Enterprise Founder</span>
+                  </div>
+                  <span style={{ fontSize: "11.5px", color: "var(--ink-3)", marginTop: "4px", display: "block" }}>
+                    Unlimited receipts &amp; analytics
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ padding: "14px", background: "var(--bg-subtle)", borderRadius: "var(--r-sm)", border: "1px solid var(--border)" }}>
+                <span className="section-label">Security Protocol</span>
+                <p style={{ fontSize: "12.5px", color: "var(--ink-2)", marginTop: "6px" }}>
+                  All ledger mutations are cryptographically mapped to your Bearer JWT token session. Data remains private and strictly isolated.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

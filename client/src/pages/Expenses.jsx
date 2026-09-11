@@ -1,283 +1,532 @@
-import { useState, useEffect, useCallback } from "react";
-import { Plus, Search, Edit2, Trash2, Receipt } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import {
+  Plus,
+  Search,
+  ArrowUpDown,
+  Edit2,
+  Trash2,
+  Check,
+  X,
+  Receipt,
+  Download,
+  Filter,
+} from "lucide-react";
 import API from "../services/api";
+import { useToast } from "../context/ToastContext";
+import { formatCurrency, formatDate, formatInputDate } from "../utils/formatters";
+import { onDataChanged } from "../utils/dataEvents";
 import ExpenseModal from "../components/ExpenseModal";
 import DeleteConfirmModal from "../components/DeleteConfirmModal";
-import { useToast } from "../context/ToastContext";
-import { formatCurrency, formatDate } from "../utils/formatters";
 
-const CATEGORIES = ["All Categories", "Food", "Travel", "Shopping", "Bills", "Entertainment", "Health", "Education", "Others"];
-
-const CATEGORY_STYLES = {
-  Food: { bg: "#fffbeb", color: "#92400e", border: "rgba(251,191,36,0.25)" },
-  Travel: { bg: "#eff6ff", color: "#1e40af", border: "rgba(59,130,246,0.2)" },
-  Shopping: { bg: "#faf5ff", color: "#6b21a8", border: "rgba(168,85,247,0.2)" },
-  Bills: { bg: "#fef2f2", color: "#991b1b", border: "rgba(239,68,68,0.2)" },
-  Entertainment: { bg: "#fdf2f8", color: "#9d174d", border: "rgba(236,72,153,0.2)" },
-  Health: { bg: "#f0fdf4", color: "#14532d", border: "rgba(34,197,94,0.2)" },
-  Education: { bg: "#eef2ff", color: "#3730a3", border: "rgba(99,102,241,0.2)" },
-  Others: { bg: "#f5f5f7", color: "#6e6e73", border: "rgba(0,0,0,0.1)" },
-};
-
-const getCategoryBadge = (category) => {
-  const style = CATEGORY_STYLES[category] || CATEGORY_STYLES.Others;
-  return (
-    <span
-      className="category-badge px-2.5 py-1 rounded-lg text-[11px] font-semibold"
-      style={{
-        background: style.bg,
-        color: style.color,
-        border: `1px solid ${style.border}`,
-      }}
-    >
-      {category}
-    </span>
-  );
-};
+const CATEGORIES = [
+  "All",
+  "Food",
+  "Travel",
+  "Shopping",
+  "Bills",
+  "Entertainment",
+  "Health",
+  "Education",
+  "Others",
+];
 
 const Expenses = () => {
   const toast = useToast();
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [expenseToEdit, setExpenseToEdit] = useState(null);
-  const [expenseToDelete, setExpenseToDelete] = useState(null);
+  // Search, filter, sorting
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("All");
+  const [sortField, setSortField] = useState("date");
+  const [sortOrder, setSortOrder] = useState("desc"); // asc | desc
 
-  const [searchTerm, setSearchTerm] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("All Categories");
+  // Modals
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingExpense, setEditingExpense] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Inline editing state
+  const [inlineEditingId, setInlineEditingId] = useState(null);
+  const [inlineForm, setInlineForm] = useState({
+    description: "",
+    amount: "",
+    category: "",
+    date: "",
+  });
+  const [isSavingInline, setIsSavingInline] = useState(false);
 
   const fetchExpenses = useCallback(async () => {
+    setLoading(true);
     try {
       const { data } = await API.get("/api/expenses");
-      if (data.success) setExpenses(data.data);
-    } catch (error) {
-      console.error("Failed to fetch expenses:", error);
+      if (data.success && Array.isArray(data.data)) {
+        setExpenses(data.data);
+      }
+    } catch {
       toast.error("Failed to load expenses list.");
     } finally {
       setLoading(false);
     }
   }, [toast]);
 
-  useEffect(() => { fetchExpenses(); }, [fetchExpenses]);
+  const handleSaveExpense = async (payload) => {
+    const request = editingExpense
+      ? API.put(`/api/expenses/${editingExpense._id}`, payload)
+      : API.post("/api/expenses", payload);
+    const { data } = await request;
+    if (!data.success) throw new Error(data.message || "Expense could not be saved.");
+    setModalOpen(false);
+    setEditingExpense(null);
+    await fetchExpenses();
+    toast.success(editingExpense ? "Expense updated" : "Expense added to ledger");
+  };
 
-  const handleSaveExpense = async (expenseData) => {
+  useEffect(() => {
+    fetchExpenses();
+  }, [fetchExpenses]);
+
+  // The AI assistant can add expenses — refresh silently when data changes.
+  useEffect(() => onDataChanged(() => fetchExpenses()), [fetchExpenses]);
+
+  // Sort toggle handler
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortOrder("desc");
+    }
+  };
+
+  // Filtered & Sorted items
+  const filteredExpenses = useMemo(() => {
+    return expenses
+      .filter((item) => {
+        const matchesSearch =
+          (item.description || "").toLowerCase().includes(search.toLowerCase()) ||
+          (item.category || "").toLowerCase().includes(search.toLowerCase());
+        const matchesCategory =
+          categoryFilter === "All" || item.category === categoryFilter;
+        return matchesSearch && matchesCategory;
+      })
+      .sort((a, b) => {
+        let valA = a[sortField];
+        let valB = b[sortField];
+
+        if (sortField === "amount") {
+          valA = Number(valA) || 0;
+          valB = Number(valB) || 0;
+        } else if (sortField === "date") {
+          valA = new Date(valA).getTime();
+          valB = new Date(valB).getTime();
+        } else {
+          valA = (valA || "").toString().toLowerCase();
+          valB = (valB || "").toString().toLowerCase();
+        }
+
+        if (valA < valB) return sortOrder === "asc" ? -1 : 1;
+        if (valA > valB) return sortOrder === "asc" ? 1 : -1;
+        return 0;
+      });
+  }, [expenses, search, categoryFilter, sortField, sortOrder]);
+
+  // Total amount of currently visible filtered rows
+  const visibleTotal = useMemo(() => {
+    return filteredExpenses.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  }, [filteredExpenses]);
+
+  // Start inline edit
+  const startInlineEdit = (item) => {
+    setInlineEditingId(item._id);
+    setInlineForm({
+      description: item.description || "",
+      amount: item.amount,
+      category: item.category || "Others",
+      date: formatInputDate(item.date),
+    });
+  };
+
+  // Cancel inline edit
+  const cancelInlineEdit = () => {
+    setInlineEditingId(null);
+    setInlineForm({ description: "", amount: "", category: "", date: "" });
+  };
+
+  // Save inline edit
+  const saveInlineEdit = async (id) => {
+    if (!inlineForm.description || !inlineForm.amount || !inlineForm.category) {
+      toast.error("Please fill in all required fields.");
+      return;
+    }
+    setIsSavingInline(true);
     try {
-      if (expenseToEdit) {
-        await API.put(`/api/expenses/${expenseToEdit._id}`, expenseData);
+      const { data } = await API.put(`/api/expenses/${id}`, {
+        description: inlineForm.description.trim(),
+        amount: parseFloat(inlineForm.amount),
+        category: inlineForm.category,
+        date: inlineForm.date,
+      });
+
+      if (data.success) {
+        setExpenses((prev) =>
+          prev.map((item) => (item._id === id ? data.data : item))
+        );
         toast.success("Expense updated successfully");
-      } else {
-        await API.post("/api/expenses", expenseData);
-        toast.success("Expense added successfully");
+        cancelInlineEdit();
       }
-      setIsExpenseModalOpen(false);
-      setExpenseToEdit(null);
-      fetchExpenses();
-    } catch (error) {
-      console.error("Failed to save expense:", error);
-      toast.error(error.response?.data?.message || "Failed to save expense");
+    } catch {
+      toast.error("Failed to update expense");
+    } finally {
+      setIsSavingInline(false);
     }
   };
 
+  // Delete handler
   const handleDeleteConfirm = async () => {
-    if (!expenseToDelete) return;
+    if (!deleteTarget) return;
+    setIsDeleting(true);
     try {
-      await API.delete(`/api/expenses/${expenseToDelete._id}`);
-      toast.success("Expense deleted successfully");
-      setIsDeleteModalOpen(false);
-      setExpenseToDelete(null);
-      fetchExpenses();
-    } catch (error) {
-      console.error("Failed to delete expense:", error);
+      const { data } = await API.delete(`/api/expenses/${deleteTarget._id}`);
+      if (data.success) {
+        setExpenses((prev) => prev.filter((item) => item._id !== deleteTarget._id));
+        toast.success("Expense removed from ledger");
+        setDeleteTarget(null);
+      }
+    } catch {
       toast.error("Failed to delete expense");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
-  const filteredExpenses = expenses.filter((exp) => {
-    const matchesSearch = String(exp.description || "").toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = categoryFilter === "All Categories" || exp.category === categoryFilter;
-    return matchesSearch && matchesCategory;
-  });
-
-  const totalFilteredAmount = filteredExpenses.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  // Export CSV
+  const handleExportCSV = () => {
+    if (expenses.length === 0) {
+      toast.info("No expense data to export.");
+      return;
+    }
+    const headers = ["Date", "Description", "Category", "Amount (INR)"];
+    const rows = filteredExpenses.map((e) => [
+      formatDate(e.date),
+      `"${(e.description || "").replace(/"/g, '""')}"`,
+      `"${e.category || ""}"`,
+      e.amount,
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `smartexpense_export_${new Date().toISOString().split("T")[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("CSV export downloaded");
+  };
 
   return (
-    <div className="app-page flex flex-col gap-6 max-w-7xl mx-auto pb-12 animate-slide-up">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="animate-fade-in">
+      {/* Header & Main Actions */}
+      <div style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "flex-start",
+        flexWrap: "wrap",
+        gap: "16px",
+      }}>
         <div>
-          <h1
-            className="text-2xl sm:text-[28px] font-black flex items-center gap-2.5"
-            style={{ color: "#1d1d1f", letterSpacing: "-0.03em" }}
-          >
-            <Receipt size={24} style={{ color: "#4f46e5" }} />
-            Expenses
+          <h1 style={{ fontSize: "24px", fontWeight: "700", letterSpacing: "-0.025em", color: "var(--ink)" }}>
+            Expense Ledger
           </h1>
-          <p className="text-sm mt-0.5" style={{ color: "#6e6e73" }}>
-            Track, filter, and control every transaction out of your account.
+          <p style={{ fontSize: "13.5px", color: "var(--ink-3)", marginTop: "2px" }}>
+            Granular breakdown and classification of all operational outflows
           </p>
         </div>
 
-        <button
-          onClick={() => { setExpenseToEdit(null); setIsExpenseModalOpen(true); }}
-          className="app-action-primary flex items-center gap-2 px-5 py-2.5 text-white font-semibold text-sm rounded-xl shadow-sm shadow-indigo-500/20 active-press cursor-pointer"
-          style={{ background: "#4f46e5" }}
-          onMouseEnter={e => (e.currentTarget.style.background = "#3730a3")}
-          onMouseLeave={e => (e.currentTarget.style.background = "#4f46e5")}
-        >
-          <Plus size={16} />
-          Add Expense
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+          <button
+            onClick={handleExportCSV}
+            className="btn btn-secondary"
+            style={{ height: "38px" }}
+            title="Download CSV report"
+          >
+            <Download size={15} />
+            <span>Export CSV</span>
+          </button>
+          <button
+            onClick={() => {
+              setEditingExpense(null);
+              setModalOpen(true);
+            }}
+            className="btn btn-primary"
+            style={{ height: "38px" }}
+          >
+            <Plus size={15} />
+            <span>Add Expense</span>
+          </button>
+        </div>
       </div>
 
-      {/* Filter & Summary Bar */}
-      <div className="glass-card p-4 rounded-2xl flex flex-col sm:flex-row gap-3 items-center">
-        <div className="flex flex-col sm:flex-row gap-3 w-full sm:flex-1">
-          {/* Search */}
-          <div className="relative flex-1 max-w-sm">
+      {/* Control Strip (Search, Filter, Total) */}
+      <div className="card" style={{ padding: "16px 20px" }}>
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "14px",
+        }}>
+          {/* Search bar */}
+          <div style={{ position: "relative", minWidth: "260px", flex: 1 }}>
             <input
               type="text"
-              placeholder="Search expenses..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full glass-input px-4 py-2.5 pl-10 rounded-xl text-sm"
-              style={{ color: "#1d1d1f" }}
+              placeholder="Search description or category..."
+              className="input"
+              style={{ paddingLeft: "36px", height: "36px" }}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
             />
-            <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "#aeaeb2" }} />
+            <Search size={14} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "var(--ink-4)" }} />
           </div>
 
           {/* Category Filter */}
-          <div className="w-full sm:w-44">
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <Filter size={14} style={{ color: "var(--ink-3)" }} />
             <select
+              className="input"
+              style={{ width: "160px", height: "36px", padding: "0 10px", fontSize: "13px" }}
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
-              style={{ color: "#1d1d1f" }}
             >
               {CATEGORIES.map((cat) => (
-                <option key={cat} value={cat}>{cat}</option>
+                <option key={cat} value={cat}>
+                  {cat === "All" ? "All Categories" : cat}
+                </option>
               ))}
             </select>
           </div>
-        </div>
 
-        {/* Total */}
-        <div
-          className="px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap"
-          style={{ background: "#f5f5f7", color: "#6e6e73", border: "1px solid rgba(0,0,0,0.06)" }}
-        >
-          Filtered:{" "}
-          <span className="font-mono font-bold" style={{ color: "#1d1d1f" }}>
-            {formatCurrency(totalFilteredAmount)}
-          </span>
+          {/* Visible Sum Badge */}
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", background: "var(--bg-subtle)", padding: "6px 12px", borderRadius: "var(--r-sm)", border: "1px solid var(--border)" }}>
+            <span style={{ fontSize: "11px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--ink-3)" }}>
+              Visible Outflow:
+            </span>
+            <span className="font-mono" style={{ fontSize: "14px", fontWeight: "700", color: "var(--fin-red)" }}>
+              - {formatCurrency(visibleTotal)}
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="glass-card rounded-2xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="app-data-table w-full text-left border-collapse">
-            <thead>
-              <tr style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
-                {["Date", "Description", "Category", "Amount", "Actions"].map((h, i) => (
-                  <th
-                    key={h}
-                    className="py-3.5 px-5 text-[11px] font-bold uppercase tracking-widest"
-                    style={{
-                      color: "#aeaeb2",
-                      background: "#fafafa",
-                      textAlign: i === 4 ? "right" : "left",
-                    }}
-                  >
-                    {h}
+      {/* Main Ledger Table */}
+      <div className="card" style={{ overflow: "hidden" }}>
+        {loading ? (
+          <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "12px" }}>
+            <div className="skeleton" style={{ height: "42px" }} />
+            <div className="skeleton" style={{ height: "42px" }} />
+            <div className="skeleton" style={{ height: "42px" }} />
+            <div className="skeleton" style={{ height: "42px" }} />
+          </div>
+        ) : filteredExpenses.length > 0 ? (
+          <div style={{ overflowX: "auto" }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th className="sortable" onClick={() => handleSort("date")} style={{ width: "130px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      Date <ArrowUpDown size={12} />
+                    </div>
                   </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan="5" className="p-10 text-center text-sm" style={{ color: "#aeaeb2" }}>
-                    <span className="inline-block w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mr-2" />
-                    Loading expenses...
-                  </td>
+                  <th className="sortable" onClick={() => handleSort("description")}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      Description <ArrowUpDown size={12} />
+                    </div>
+                  </th>
+                  <th className="sortable" onClick={() => handleSort("category")} style={{ width: "150px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      Category <ArrowUpDown size={12} />
+                    </div>
+                  </th>
+                  <th className="sortable" onClick={() => handleSort("amount")} style={{ textAlign: "right", width: "150px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px" }}>
+                      Amount <ArrowUpDown size={12} />
+                    </div>
+                  </th>
+                  <th style={{ textAlign: "right", width: "110px" }}>Actions</th>
                 </tr>
-              ) : filteredExpenses.length === 0 ? (
-                <tr>
-                  <td colSpan="5" className="p-12 text-center">
-                    <Receipt size={32} className="mx-auto mb-3" style={{ color: "#e5e5ea" }} />
-                    <p className="text-sm font-semibold mb-1" style={{ color: "#1d1d1f" }}>No expenses found</p>
-                    <p className="text-xs" style={{ color: "#aeaeb2" }}>
-                      Try adjusting your search or add a new expense.
-                    </p>
-                  </td>
-                </tr>
-              ) : (
-                filteredExpenses.map((exp) => (
-                  <tr
-                    key={exp._id}
-                    className="data-row group transition-colors"
-                    style={{ borderBottom: "1px solid rgba(0,0,0,0.04)" }}
-                    onMouseEnter={e => (e.currentTarget.style.background = "#f9f9f9")}
-                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
-                  >
-                    <td className="date-cell py-3.5 px-5 text-xs font-mono" style={{ color: "#aeaeb2" }}>
-                      {formatDate(exp.date)}
-                    </td>
-                    <td className="primary-cell py-3.5 px-5 text-sm font-medium" style={{ color: "#1d1d1f" }}>
-                      {exp.description}
-                    </td>
-                    <td className="py-3.5 px-5">
-                      {getCategoryBadge(exp.category)}
-                    </td>
-                    <td className="amount-cell py-3.5 px-5 text-sm font-bold font-mono" style={{ color: "#1d1d1f" }}>
-                      {formatCurrency(exp.amount)}
-                    </td>
-                    <td className="py-3.5 px-5 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => { setExpenseToEdit(exp); setIsExpenseModalOpen(true); }}
-                          className="table-icon-button p-1.5 rounded-lg active-press cursor-pointer transition-colors"
-                          style={{ color: "#aeaeb2" }}
-                          onMouseEnter={e => { e.currentTarget.style.color = "#4f46e5"; e.currentTarget.style.background = "#eef2ff"; }}
-                          onMouseLeave={e => { e.currentTarget.style.color = "#aeaeb2"; e.currentTarget.style.background = "transparent"; }}
-                          title="Edit expense"
-                        >
-                          <Edit2 size={14} />
-                        </button>
-                        <button
-                          onClick={() => { setExpenseToDelete(exp); setIsDeleteModalOpen(true); }}
-                          className="table-icon-button p-1.5 rounded-lg active-press cursor-pointer transition-colors"
-                          style={{ color: "#aeaeb2" }}
-                          onMouseEnter={e => { e.currentTarget.style.color = "#dc2626"; e.currentTarget.style.background = "#fef2f2"; }}
-                          onMouseLeave={e => { e.currentTarget.style.color = "#aeaeb2"; e.currentTarget.style.background = "transparent"; }}
-                          title="Delete expense"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filteredExpenses.map((item) => {
+                  const isInline = inlineEditingId === item._id;
+
+                  if (isInline) {
+                    return (
+                      <tr key={item._id} style={{ background: "#f1f5f9" }}>
+                        <td>
+                          <input
+                            type="date"
+                            className="input"
+                            style={{ height: "32px", fontSize: "12px", padding: "0 6px" }}
+                            value={inlineForm.date}
+                            onChange={(e) => setInlineForm({ ...inlineForm, date: e.target.value })}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="text"
+                            className="input"
+                            style={{ height: "32px", fontSize: "12.5px" }}
+                            value={inlineForm.description}
+                            onChange={(e) => setInlineForm({ ...inlineForm, description: e.target.value })}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveInlineEdit(item._id);
+                              if (e.key === "Escape") cancelInlineEdit();
+                            }}
+                            autoFocus
+                          />
+                        </td>
+                        <td>
+                          <select
+                            className="input"
+                            style={{ height: "32px", fontSize: "12px", padding: "0 6px" }}
+                            value={inlineForm.category}
+                            onChange={(e) => setInlineForm({ ...inlineForm, category: e.target.value })}
+                          >
+                            {CATEGORIES.filter((c) => c !== "All").map((cat) => (
+                              <option key={cat} value={cat}>{cat}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <input
+                            type="number"
+                            step="any"
+                            className="input font-mono"
+                            style={{ height: "32px", fontSize: "12.5px", textAlign: "right", width: "120px", marginLeft: "auto" }}
+                            value={inlineForm.amount}
+                            onChange={(e) => setInlineForm({ ...inlineForm, amount: e.target.value })}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveInlineEdit(item._id);
+                              if (e.key === "Escape") cancelInlineEdit();
+                            }}
+                          />
+                        </td>
+                        <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                          <div style={{ display: "inline-flex", gap: "4px" }}>
+                            <button
+                              onClick={() => saveInlineEdit(item._id)}
+                              className="btn btn-primary"
+                              style={{ width: "28px", height: "28px", padding: 0 }}
+                              disabled={isSavingInline}
+                              title="Save changes (Enter)"
+                            >
+                              <Check size={14} />
+                            </button>
+                            <button
+                              onClick={cancelInlineEdit}
+                              className="btn btn-secondary"
+                              style={{ width: "28px", height: "28px", padding: 0 }}
+                              title="Cancel (Esc)"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  return (
+                    <tr
+                      key={item._id}
+                      onDoubleClick={() => startInlineEdit(item)}
+                      title="Double-click to inline edit"
+                    >
+                      <td style={{ color: "var(--ink-3)", whiteSpace: "nowrap", fontSize: "12px" }}>
+                        {formatDate(item.date)}
+                      </td>
+                      <td style={{ fontWeight: "600" }}>
+                        {item.description}
+                      </td>
+                      <td>
+                        <span className="badge">
+                          {item.category || "General"}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <span className="font-mono" style={{ fontWeight: "600", color: "var(--fin-red)" }}>
+                          - {formatCurrency(item.amount)}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                        <div style={{ display: "inline-flex", gap: "4px" }}>
+                          <button
+                            onClick={() => startInlineEdit(item)}
+                            className="btn-icon"
+                            title="Inline edit row"
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            onClick={() => setDeleteTarget(item)}
+                            className="btn-icon"
+                            style={{ color: "var(--fin-red)" }}
+                            title="Delete expense"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="empty-state" style={{ padding: "50px 20px" }}>
+            <Receipt size={32} style={{ marginBottom: "10px", opacity: 0.5 }} />
+            <h3 style={{ fontSize: "15px", fontWeight: "600", color: "var(--ink)", marginBottom: "4px" }}>
+              No matching expense records
+            </h3>
+            <p style={{ fontSize: "13px", color: "var(--ink-3)", marginBottom: "16px" }}>
+              {search || categoryFilter !== "All"
+                ? "Try adjusting your search criteria or category filter."
+                : "No expenses have been recorded yet. Click below to add your first expense."}
+            </p>
+            <button
+              onClick={() => {
+                setEditingExpense(null);
+                setModalOpen(true);
+              }}
+              className="btn btn-primary"
+            >
+              <Plus size={14} /> Add First Expense
+            </button>
+          </div>
+        )}
       </div>
 
+      {/* Modal Dialog for Add / Edit */}
       <ExpenseModal
-        isOpen={isExpenseModalOpen}
-        onClose={() => setIsExpenseModalOpen(false)}
+        isOpen={modalOpen}
+        onClose={() => {
+          setModalOpen(false);
+          setEditingExpense(null);
+        }}
+        expenseToEdit={editingExpense}
         onSave={handleSaveExpense}
-        expenseToEdit={expenseToEdit}
       />
+
+      {/* Delete Confirmation Modal */}
       <DeleteConfirmModal
-        isOpen={isDeleteModalOpen}
-        onClose={() => setIsDeleteModalOpen(false)}
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
         onConfirm={handleDeleteConfirm}
         title="Delete Expense"
-        message="Are you sure you want to delete this expense record? This action cannot be reversed."
+        message={`Are you sure you want to permanently delete "${deleteTarget?.description || "this expense"}" of ${formatCurrency(deleteTarget?.amount || 0)}? This action cannot be undone.`}
+        loading={isDeleting}
       />
     </div>
   );

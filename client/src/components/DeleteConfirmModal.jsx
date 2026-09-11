@@ -1,76 +1,49 @@
-import { useEffect } from "react";
-import { Trash2 } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { AlertTriangle } from "lucide-react";
 
-const DeleteConfirmModal = ({
-  isOpen,
-  onClose,
-  onConfirm,
-  title = "Delete Record",
-  message = "Are you sure you want to permanently delete this item? This action cannot be undone.",
-}) => {
+const DeleteConfirmModal = ({ isOpen, onClose, onConfirm, title, message }) => {
+  const cancelRef = useRef(null);
+
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === "Escape" && isOpen) onClose();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    if (!isOpen) return;
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    setTimeout(() => cancelRef.current?.focus(), 50);
+    return () => window.removeEventListener("keydown", onKey);
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
   return (
     <div
-      className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 transition-opacity duration-200"
-      style={{ background: "rgba(0,0,0,0.3)", backdropFilter: "blur(6px)" }}
+      className="modal-backdrop"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       role="dialog"
       aria-modal="true"
+      aria-labelledby="del-title"
     >
-      <div
-        className="modal-surface w-full max-w-sm rounded-2xl p-6 animate-modal text-center"
-        style={{
-          background: "#ffffff",
-          border: "1px solid rgba(220,38,38,0.15)",
-          boxShadow: "0 24px 64px rgba(0,0,0,0.12), 0 4px 16px rgba(0,0,0,0.06)",
-        }}
-      >
-        {/* Danger icon */}
-        <div
-          className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4"
-          style={{ background: "#fef2f2", color: "#dc2626" }}
-        >
-          <Trash2 size={22} />
+      <div className="modal-panel" style={{ padding: "24px" }}>
+        <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 20 }}>
+          <div style={{
+            width: 38, height: 38, borderRadius: 10, flexShrink: 0,
+            background: "var(--fin-red-bg)", color: "var(--fin-red)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            border: "1px solid var(--fin-red-border)",
+          }}>
+            <AlertTriangle size={17} />
+          </div>
+          <div>
+            <h2 id="del-title" style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)", lineHeight: 1.2, marginBottom: 4 }}>
+              {title || "Confirm deletion"}
+            </h2>
+            <p style={{ fontSize: 13, color: "var(--ink-3)", lineHeight: 1.5 }}>
+              {message || "This action cannot be undone."}
+            </p>
+          </div>
         </div>
-
-        <h3
-          className="text-[17px] font-bold mb-2"
-          style={{ color: "#1d1d1f", letterSpacing: "-0.02em" }}
-        >
-          {title}
-        </h3>
-        <p className="text-sm leading-relaxed mb-6" style={{ color: "#6e6e73" }}>
-          {message}
-        </p>
-
-        <div className="flex gap-3">
-          <button
-            onClick={onClose}
-            className="modal-cancel flex-1 py-3 px-4 font-semibold text-sm rounded-xl active-press cursor-pointer"
-            style={{ background: "#f5f5f7", color: "#6e6e73", border: "1px solid rgba(0,0,0,0.08)" }}
-            onMouseEnter={e => (e.currentTarget.style.background = "#ebebeb")}
-            onMouseLeave={e => (e.currentTarget.style.background = "#f5f5f7")}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            className="modal-danger flex-1 py-3 px-4 text-white font-semibold text-sm rounded-xl shadow-sm shadow-rose-500/20 active-press cursor-pointer"
-            style={{ background: "#dc2626" }}
-            onMouseEnter={e => (e.currentTarget.style.background = "#b91c1c")}
-            onMouseLeave={e => (e.currentTarget.style.background = "#dc2626")}
-          >
-            Delete
-          </button>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <button ref={cancelRef} className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-danger" onClick={onConfirm} style={{ background: "var(--fin-red)", color: "white", border: "none" }}>Delete</button>
         </div>
       </div>
     </div>

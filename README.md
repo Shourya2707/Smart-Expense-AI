@@ -133,3 +133,6 @@ Frontend Web App will open at **http://localhost:5173**
 
 ## 📄 License
 ISC
+# Railway deployment
+
+The included `Dockerfile` builds the Vite client and serves it from the Express server. Set `GROQ_API_KEY` and `JWT_SECRET` in Railway variables. SQLite is stored at `DATA_DIR` (default: `server/data`); attach a Railway Volume at `/app/server/data` if demo data must survive redeploys.

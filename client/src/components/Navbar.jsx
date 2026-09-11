@@ -1,87 +1,109 @@
 import { Link } from "react-router-dom";
-import { User, Menu, Sparkles, Shield, Bell } from "lucide-react";
+import { Menu, ShieldCheck, Bell } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
-const Navbar = ({ onToggleMobileSidebar }) => {
+const initials = (name) => {
+  if (!name) return "U";
+  return name.split(" ").map((p) => p[0]).join("").toUpperCase().slice(0, 2);
+};
+
+const Navbar = ({ onToggleMobile }) => {
   const { user } = useAuth();
 
-  const getInitials = (name) => {
-    if (!name) return "U";
-    return name
-      .split(" ")
-      .map((part) => part[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2);
-  };
-
   return (
-    <header
-      className="app-navbar h-14 flex items-center justify-between px-4 sm:px-6 md:px-8 sticky top-0 z-30"
-    >
-      <div className="flex items-center gap-3">
-        {/* Mobile menu button */}
+    <header style={{
+      height: 56,
+      background: "rgba(255,255,255,0.9)",
+      backdropFilter: "blur(12px)",
+      borderBottom: "1px solid var(--border)",
+      padding: "0 20px",
+      position: "sticky",
+      top: 0,
+      zIndex: 30,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12,
+    }}>
+      {/* Left */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <button
-          onClick={onToggleMobileSidebar}
-          className="app-icon-button p-2 rounded-xl active-press md:hidden cursor-pointer"
-          title="Open Navigation"
-          aria-label="Open Navigation"
+          onClick={onToggleMobile}
+          className="btn-icon"
+          aria-label="Open navigation"
+          style={{ display: "none" }}
+          id="nav-menu-btn"
         >
-          <Menu size={20} />
+          <Menu size={18} />
         </button>
 
-        {/* Brand tag — mobile only */}
-        <div className="md:hidden flex items-center gap-2">
-          <div className="brand-mark w-7 h-7 rounded-lg flex items-center justify-center text-white shadow-sm">
-            <Sparkles size={14} />
-          </div>
-          <span className="app-brand-name font-bold text-sm">
-            SmartExpense
-          </span>
-        </div>
-
-        {/* Status pill — desktop */}
-        <div className="app-protected-pill hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-          <Shield size={11} className="opacity-70" />
-          <span>Bank-Grade Protected</span>
+        {/* Status pill — desktop only */}
+        <div style={{
+          display: "inline-flex", alignItems: "center", gap: 6,
+          padding: "4px 10px",
+          borderRadius: 999,
+          border: "1px solid var(--border)",
+          background: "var(--bg-subtle)",
+          fontSize: 11.5,
+          fontWeight: 600,
+          color: "var(--ink-3)",
+        }} className="status-pill">
+          <ShieldCheck size={12} style={{ color: "var(--fin-green)" }} />
+          Encrypted workspace
         </div>
       </div>
 
-      <div className="flex items-center gap-2 ml-auto">
-        {/* Notification button */}
-        <button
-          className="app-icon-button relative p-2 rounded-xl active-press cursor-pointer"
-          title="Notifications"
-          aria-label="Notifications"
-        >
-          <Bell size={17} />
-          <span
-            className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500"
-          />
+      {/* Right */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <button className="btn-icon" aria-label="Notifications" style={{ position: "relative" }}>
+          <Bell size={16} />
+          <span style={{
+            position: "absolute", top: 7, right: 7,
+            width: 6, height: 6, borderRadius: "50%",
+            background: "var(--fin-red)", border: "1.5px solid white",
+          }} />
         </button>
 
-        {/* Profile pill */}
         <Link
           to="/profile"
-          className="app-profile-link flex items-center gap-2.5 pl-2 sm:pl-3 py-1.5 pr-2 rounded-2xl transition-all active-press group"
-          title="View profile"
+          style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "5px 10px 5px 12px",
+            borderRadius: 999,
+            border: "1px solid var(--border)",
+            background: "var(--surface)",
+            textDecoration: "none",
+            transition: "background 150ms ease, border-color 150ms ease",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-subtle)"; e.currentTarget.style.borderColor = "var(--border-md)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "var(--surface)"; e.currentTarget.style.borderColor = "var(--border)"; }}
         >
-          <div className="text-right hidden sm:block">
-            <p className="app-profile-name text-[12.5px] font-semibold leading-tight">
-              {user?.fullName || "User Account"}
-            </p>
-            <p className="app-profile-email text-[11px] leading-tight">
-              {user?.email || "smart@expense.ai"}
-            </p>
+          <div style={{ textAlign: "right" }} className="name-col">
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink)", lineHeight: 1.2 }}>
+              {user?.fullName || "Account"}
+            </div>
+            <div style={{ fontSize: 10.5, color: "var(--ink-4)", fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.1 }}>
+              {user?.email || ""}
+            </div>
           </div>
-
-          {/* Avatar */}
-          <div className="app-avatar w-8 h-8 rounded-xl flex items-center justify-center text-white font-bold text-xs shadow-sm group-hover:scale-105 transition-transform">
-            {user?.fullName ? getInitials(user.fullName) : <User size={15} />}
+          <div style={{
+            width: 28, height: 28, borderRadius: "50%",
+            background: "var(--brand)", color: "white",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 11, fontWeight: 700, flexShrink: 0,
+          }}>
+            {initials(user?.fullName)}
           </div>
         </Link>
       </div>
+
+      <style>{`
+        @media (max-width: 767px) {
+          #nav-menu-btn { display: flex !important; }
+          .name-col { display: none; }
+          .status-pill { display: none !important; }
+        }
+      `}</style>
     </header>
   );
 };
