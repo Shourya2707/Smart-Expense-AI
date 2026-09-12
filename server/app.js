@@ -33,6 +33,7 @@ app.get("/", (req, res) => {
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/expenses", require("./routes/expenseRoutes"));
 app.use("/api/income", require("./routes/incomeRoutes"));
+app.use("/api/budgets", require("./routes/budgetRoutes"));
 app.use("/api/analytics", require("./routes/analyticsRoutes"));
 app.use("/api/ai", require("./routes/aiRoutes"));
 app.use("/api/admin", require("./routes/adminRoutes"));

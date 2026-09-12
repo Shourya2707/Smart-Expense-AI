@@ -25,7 +25,7 @@ function buildTools(userId) {
       name: "add_expense",
       description: `Record a new expense for the user. Use when the user says they spent/paid/bought something. Categories: ${CATEGORIES.join(", ")}.`,
       schema: z.object({
-        amount: z.number().positive().describe("Amount spent in INR"),
+        amount: z.coerce.number().positive().describe("Amount spent in INR"),
         category: z.enum(CATEGORIES).describe("Expense category"),
         description: z.string().min(2).max(120).describe("Short description or merchant name"),
         date: z.string().optional().describe("Expense date as YYYY-MM-DD; omit to use today"),
@@ -46,7 +46,7 @@ function buildTools(userId) {
       name: "add_income",
       description: `Record new income for the user. Sources: ${SOURCES.join(", ")}.`,
       schema: z.object({
-        amount: z.number().positive().describe("Amount received in INR"),
+        amount: z.coerce.number().positive().describe("Amount received in INR"),
         source: z.enum(SOURCES).describe("Income source"),
         date: z.string().optional().describe("Income date as YYYY-MM-DD; omit to use today"),
       }),

@@ -123,7 +123,8 @@ async function getInsights(userId) {
       success: true,
     });
     if (parsed?.title && parsed?.message && ["success", "warning", "info"].includes(parsed.type)) {
-      return { insights: [...local, { type: parsed.type, title: parsed.title, message: parsed.message }].slice(0, 4), source: "groq" };
+      // Prepend: localInsights caps at 4, so appending would silently drop the LLM suggestion.
+      return { insights: [{ type: parsed.type, title: parsed.title, message: parsed.message }, ...local].slice(0, 4), source: "groq" };
     }
   } catch (error) {
     AiEvent.insert({ userId, feature: "insights", model: env.groqTextModel, latencyMs: Date.now() - started, success: false, error: error.message });

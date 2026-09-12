@@ -42,12 +42,22 @@ const PERIODS = [
 
 const round = (n) => Math.round(n * 100) / 100;
 
-function addEvent(onEvent, event) {
+function addEvent(userId, onEvent, event) {
   onEvent?.(event);
+  // Fallback tools are logged too, so tool health charts stay honest in offline mode.
+  if (event.type === "tool") {
+    try {
+      AiEvent.insert({ userId, feature: "tool", model: "fallback", toolName: event.name, latencyMs: 0, success: Boolean(event.result?.ok ?? true) });
+    } catch { /* telemetry must never break the request */ }
+  }
 }
 
-async function tryAddExpense(userId, text, onEvent) {
-  const match = text.match(/(?:spent|paid|bought|add(?:ed)?)\s*(?:an?\s*)?(?:expense\s*(?:of|for)?\s*)?(?:₹|rs\.?|inr)?\s*(\d+(?:\.\d{1,2})?)\s*(?:on|for|at|towards|in)?\s*(.+)/i);
+async function tryAddExpense(userId, text, onEvent, { skip = false } = {}) {
+  if (skip) return null;
+  // "add income 5000" / "got paid 5000" must never land here as an expense.
+  if (/\bincome\b|\bsalary\b|\bfreelanc|\breceived\b|\bearned\b|\bgot paid\b/i.test(text)) return null;
+  const normalized = text.replace(/(\d),(\d)/g, "$1$2"); // "1,500" → "1500"
+  const match = normalized.match(/(?:spent|paid|bought|add(?:ed)?)\s*(?:an?\s*)?(?:expense\s*(?:of|for)?\s*)?(?:₹|rs\.?|inr)?\s*(\d+(?:\.\d{1,2})?)\s*(?:on|for|at|towards|in)?\s*(.+)/i);
   if (!match) return null;
 
   const amount = round(Number(match[1]));
@@ -57,19 +67,20 @@ async function tryAddExpense(userId, text, onEvent) {
   const description = rest.replace(/[.?!]+$/, "").slice(0, 80);
 
   const created = await Expense.create({ userId, amount, category, description, date });
-  addEvent(onEvent, { type: "tool", name: "add_expense", args: { amount, category, description, date }, result: { ok: true } });
+  addEvent(userId, onEvent, { type: "tool", name: "add_expense", args: { amount, category, description, date }, result: { ok: true } });
   return `Logged ₹${amount} for ${description} under ${category} (${date}). I'm running without a Groq API key right now, so I used offline mode — add one in server/.env for the full AI experience.`;
 }
 
 async function tryAddIncome(userId, text, onEvent) {
-  const match = text.match(/(?:received|got|earned|add(?:ed)?)\s*(?:income\s*(?:of|from)?\s*|salary\s*)?(?:₹|rs\.?|inr)?\s*(\d+(?:\.\d{1,2})?)\s*(?:as|from|via)?\s*(.+)/i);
+  const normalized = text.replace(/(\d),(\d)/g, "$1$2");
+  const match = normalized.match(/(?:received|got\s+paid|got|earned|add(?:ed)?)\s*(?:income\s*(?:of|from)?\s*|salary\s*)?(?:₹|rs\.?|inr)?\s*(\d+(?:\.\d{1,2})?)\s*(?:as|from|via)?\s*(.+)/i);
   if (!match || !/incom|salar|freelanc|earned|received|got paid/i.test(text)) return null;
 
   const amount = round(Number(match[1]));
   const source = guessSource(text);
   const date = resolveDate(text);
   const created = await Income.create({ userId, amount, source, date });
-  addEvent(onEvent, { type: "tool", name: "add_income", args: { amount, source, date }, result: { ok: true } });
+  addEvent(userId, onEvent, { type: "tool", name: "add_income", args: { amount, source, date }, result: { ok: true } });
   return `Recorded ₹${amount} income from ${source} (${date}).`;
 }
 
@@ -97,12 +108,12 @@ async function tryAnswerQuestion(userId, text) {
   ].filter(Boolean).join(" ");
 }
 
-async function runFallback({ userId, userMessage, onEvent }) {
+async function runFallback({ userId, userMessage, onEvent, skipAdds = false }) {
   const started = Date.now();
   let text = null;
 
-  const addResult = await tryAddExpense(userId, userMessage, onEvent)
-    || await tryAddIncome(userId, userMessage, onEvent)
+  const addResult = await tryAddIncome(userId, userMessage, onEvent)
+    || await tryAddExpense(userId, userMessage, onEvent, { skip: skipAdds })
     || await tryAnswerQuestion(userId, userMessage);
 
   if (addResult) {

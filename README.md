@@ -2,137 +2,105 @@
 
 > **Track Smarter. Spend Wiser.**
 
-An AI-powered expense tracking and personal finance web application built with React, Vite, Node.js, Express, MongoDB, and Google Gemini AI.
+An AI-powered expense tracking and personal finance app with a LangChain agent that actually *acts* on your ledger — add transactions and query your spending in plain English, by text or voice. Built with React 19 + Vite, Express 5, SQLite, and Groq (free tier).
 
 ---
 
-## 🌟 Key Features
+## ✨ Features
 
-- **🔐 Secure Authentication**: JWT token authentication with bcrypt password hashing and user isolation.
-- **📊 Real-Time Dashboard**: Connected directly to real database analytics — balance, income, expenses, and net savings.
-- **🧾 Smart Receipt Scanner**: Upload paper or digital receipts; Gemini Vision extracts merchant, total amount, date, and category automatically for user confirmation before saving.
-- **🤖 Gemini AI Insights**: Personalized spending trends, savings opportunities, and category concentration alerts generated directly from user financial data.
-- **💸 Complete Expense & Income Management**: Full CRUD operations with categories, search filtering, and confirmation modals.
-- **📈 Interactive Analytics**: Monthly Income vs. Expense bar charts and expense breakdown pie charts powered by Recharts.
-- **👤 Profile Security**: Profile management with name update and mandatory current password verification before password changes.
-- **🎨 Modern Fintech UI**: Dark glassmorphism interface built with Tailwind CSS v4, smooth animations, and responsive layout across desktop, tablet, and mobile.
+- **🤖 Agentic AI Assistant** — a LangChain tool-calling agent (Groq, `llama-3.1-8b-instant`) with 7 tools: `add_expense`, `add_income`, `get_summary`, `category_breakdown`, `monthly_trend`, `search_transactions`, `list_recent_transactions`. Type or *speak* `"spent 250 on groceries yesterday"` and it writes to your ledger for real. Tool runs show up as live chips in the chat; dashboards refresh instantly.
+- **🎙️ Voice, zero cost** — browser Web Speech API for dictation and spoken replies. No paid STT/TTS APIs.
+- **🧾 Receipt Scanner** — Groq vision model (`llama-4-scout`) extracts merchant, amount, date, and category from receipt photos for confirmation before saving.
+- **📊 Verified Analytics** — totals, category breakdown, monthly inflow/outflow, and net trajectory computed with timezone-safe date handling, with an independent verification script (`npm run verify`).
+- **📈 Observability for admins** — per-day request traffic, p95 latency, AI token usage, per-tool success rates, and recent errors at `/admin` (users listed in `ADMIN_EMAILS`).
+- **🔐 Auth** — JWT (7-day) + bcrypt, per-user data isolation, strict input validation, no fallback secrets in production.
+- **💾 Zero-infra persistence** — SQLite (WAL mode) at `DATA_DIR`; mount a volume in production and you're done.
+- **🎞️ Fluid UI** — spring-physics chat panel (framer-motion), staggered messages, tool-trace chips, typing dots, pulsing mic — consistent with the existing slate/glassmorphism design system.
 
 ---
 
-## 📁 Project Architecture
+## 📁 Project Structure
 
 ```
 SmartExpense-AI/
-├── client/                     # React Frontend (Vite + Tailwind CSS)
-│   ├── public/                 # Static assets
-│   ├── src/
-│   │   ├── components/         # Reusable UI components (Navbar, Sidebar, Modals, SummaryCard)
-│   │   ├── layouts/            # DashboardLayout wrapper
-│   │   ├── pages/              # Home, Login, Signup, Dashboard, Expenses, Income, Analytics, ReceiptScanner, Profile
-│   │   ├── services/           # Axios instance with auto-JWT request interceptor
-│   │   ├── App.jsx             # React Router route registry
-│   │   ├── main.jsx            # DOM entry point
-│   │   └── index.css           # Custom theme tokens & Tailwind imports
-│   ├── vite.config.js          # Vite config & API proxy
-│   ├── .env.example            # Environment variables example
-│   └── package.json
-│
-├── server/                     # Node.js + Express REST API Backend
-│   ├── config/                 # MongoDB database connection setup
-│   ├── controllers/            # Auth, Expense, Income, Analytics, and AI/Receipt logic
-│   ├── middleware/              # JWT auth guard (`protect`) & Error handling
-│   ├── models/                 # Mongoose schemas (User, Expense, Income)
-│   ├── routes/                 # Express API routes
-│   ├── app.js                  # Express setup, middleware, routes, CORS
-│   ├── server.js               # HTTP server entry point
-│   ├── .env.example            # Environment variables example
-│   └── package.json
-│
+├── client/                      # React 19 + Vite + Tailwind 4
+│   └── src/
+│       ├── components/          # AssistantPanel/FAB (chat), modals, sidebar…
+│       ├── hooks/useSpeech.js   # Web Speech API (STT + TTS)
+│       ├── pages/               # Dashboard, Expenses, Income, Analytics,
+│       │                        # ReceiptScanner, Profile, AdminDashboard
+│       ├── services/api.js      # Axios instance + SSE chat streaming
+│       └── utils/               # formatters (timezone-safe), data event bus
+├── server/                      # Express 5 + better-sqlite3 (CommonJS)
+│   ├── config/                  # env.js (validated env), db.js (schema + mappers)
+│   ├── models/                  # User, Expense, Income, ChatMessage, AiEvent, RequestLog
+│   ├── services/
+│   │   ├── ai/                  # agent.js (LangChain loop), tools.js, fallback.js, insights.js
+│   │   └── analyticsService.js  # all financial math (single source of truth)
+│   ├── controllers/ routes/ middleware/
+│   ├── scripts/                 # seed.js, verify-analytics.js
+│   └── data/                    # smartexpense.sqlite (gitignored)
+├── Dockerfile                   # Railway/any-container deploy
 └── README.md
 ```
 
----
+## ⚙️ Environment Variables
 
-## ⚙️ Environment Variables Setup
+Copy `server/.env.example` → `server/.env` and `client/.env.example` → `client/.env`, then fill in:
 
-Create `.env` files in both `server/` and `client/` directories based on the example templates:
+| Variable (server) | Required | Purpose |
+|---|---|---|
+| `JWT_SECRET` | ✅ | Token signing — server refuses to boot without it |
+| `GROQ_API_KEY` | for AI | Free key from [console.groq.com](https://console.groq.com/keys). Without it the assistant runs in deterministic offline mode |
+| `GROQ_TEXT_MODEL` / `GROQ_VISION_MODEL` | — | Model overrides (defaults: `llama-3.1-8b-instant`, `llama-4-scout`) |
+| `ADMIN_EMAILS` | — | Comma-separated emails that can access `/admin` |
+| `CLIENT_URL` | prod | Allowed CORS origin(s), comma-separated |
+| `DATA_DIR` | prod | SQLite location (mount a volume here) |
 
-### Backend (`server/.env`)
-```env
-PORT=5000
-NODE_ENV=development
-CLIENT_URL=http://localhost:5173
-MONGO_URI=mongodb://127.0.0.1:27017/smartexpense-ai
-JWT_SECRET=your_super_secret_jwt_key
-JWT_EXPIRE=7d
+## 🚀 Local Development
 
-# Optional AI & Cloud Features
-GEMINI_API_KEY=your_google_gemini_api_key
-CLOUDINARY_CLOUD_NAME=your_cloud_name
-CLOUDINARY_API_KEY=your_api_key
-CLOUDINARY_API_SECRET=your_api_secret
-```
-
-### Frontend (`client/.env`)
-```env
-VITE_API_BASE_URL=http://localhost:5000
-VITE_APP_NAME=SmartExpense AI
-```
-
----
-
-## 🚀 Local Development Setup
-
-### 1. Backend Server
 ```bash
+# 1. Backend
+cd server && npm install && npm run dev        # → http://localhost:5001
+
+# 2. Frontend (new terminal)
+cd client && npm install && npm run dev        # → http://localhost:5173 (proxies /api)
+
+# 3. Demo data + verification
 cd server
-npm install
-npm run dev
+npm run seed      # demo@smartexpense.app / Demo@12345 (~3 months of transactions)
+npm run verify    # independently re-checks every analytics metric ✅
 ```
-Backend API will start at **http://localhost:5000**
 
-### 2. Frontend Client
-```bash
-cd client
-npm install
-npm run dev
-```
-Frontend Web App will open at **http://localhost:5173**
-
----
-
-## 📡 API Endpoints Overview
+## 📡 API Overview
 
 | Method | Endpoint | Access | Description |
 |---|---|---|---|
-| GET | `/` | Public | Health Check |
-| POST | `/api/auth/register` | Public | User Registration |
-| POST | `/api/auth/login` | Public | User Login |
-| GET | `/api/auth/me` | Private | Get Profile Details |
-| PUT | `/api/auth/profile` | Private | Update Profile / Change Password |
-| GET | `/api/expenses` | Private | Fetch User Expenses |
-| POST | `/api/expenses` | Private | Create Expense |
-| PUT | `/api/expenses/:id` | Private | Update Expense |
-| DELETE | `/api/expenses/:id` | Private | Delete Expense |
-| GET | `/api/income` | Private | Fetch User Income |
-| POST | `/api/income` | Private | Create Income |
-| PUT | `/api/income/:id` | Private | Update Income |
-| DELETE | `/api/income/:id` | Private | Delete Income |
-| GET | `/api/analytics` | Private | Get Aggregated Financial Data |
-| GET | `/api/ai/gemini-insights` | Private | Get AI Financial Insights |
-| POST | `/api/ai/scan-receipt` | Private | Extract Receipt Info via Vision AI |
+| POST | `/api/auth/register` · `/api/auth/login` | Public | JWT auth |
+| GET | `/api/auth/me` · PUT `/api/auth/profile` | Private | Profile |
+| GET/POST | `/api/expenses` | Private | List / create |
+| PUT/DELETE | `/api/expenses/:id` | Private | Update / delete |
+| GET/POST | `/api/income` | Private | List / create |
+| PUT/DELETE | `/api/income/:id` | Private | Update / delete |
+| GET | `/api/analytics` | Private | All computed metrics |
+| POST | `/api/ai/chat` | Private | SSE agent stream (tokens + tool events) |
+| GET/POST | `/api/ai/chat/history` · `/chat/reset` | Private | Conversation memory |
+| GET | `/api/ai/insights` | Private | Local + Groq-enhanced insights |
+| POST | `/api/ai/scan-receipt` | Private | Vision extraction (multipart `receipt`) |
+| GET | `/api/admin/overview` · `/series` · `/tools` · `/errors` | Admin | Observability |
 
----
+## 🌐 Deployment (Railway free tier)
 
-## 🌐 Deployment Instructions
+The included `Dockerfile` builds the client and serves it from Express in one process — a single free-tier service, no managed DB needed.
 
-- **Frontend (Vercel)**: Build command `npm run build`, output directory `dist`. Set `VITE_API_BASE_URL` to your production backend URL.
-- **Backend (Render)**: Build command `npm install`, start command `npm start`. Configure `MONGO_URI`, `JWT_SECRET`, `GEMINI_API_KEY`, and `CLIENT_URL` in environment variables.
+1. Deploy the repo; set variables: `JWT_SECRET`, `GROQ_API_KEY`, `CLIENT_URL=https://<your-app>.up.railway.app`, `ADMIN_EMAILS=<your email>`, and `NODE_ENV=production`.
+2. Attach a Railway Volume at `/app/server/data` if demo/persisted data must survive redeploys.
+3. (Optional) Seed demo data once via `railway run npm run seed` or a one-off shell.
 
----
+### How the AI stays free
+- **LLM**: Groq free tier (rate-limited but generous; the agent caps tool loops at 5 and truncates context to the last 12 messages to conserve tokens).
+- **STT/TTS**: browser Web Speech API — nothing leaves your budget.
+- **Fallback**: no key or API failure → a deterministic responder still logs "spent X on Y" commands and answers summary questions, so the app degrades, never dies.
 
 ## 📄 License
 ISC
-# Railway deployment
-
-The included `Dockerfile` builds the Vite client and serves it from the Express server. Set `GROQ_API_KEY` and `JWT_SECRET` in Railway variables. SQLite is stored at `DATA_DIR` (default: `server/data`); attach a Railway Volume at `/app/server/data` if demo data must survive redeploys.

@@ -106,6 +106,11 @@ const AssistantPanel = ({ open, onClose }) => {
             streamed += event.text || "";
             patchLast({ text: streamed });
           }
+          if (event.type === "answer") {
+            // Authoritative final text from the server — replaces streamed partials.
+            streamed = event.text || "";
+            patchLast({ text: streamed });
+          }
           if (event.type === "tool") {
             appendTool({ name: event.name, ok: event.result?.ok !== false });
             if (["add_expense", "add_income"].includes(event.name)) emitDataChanged("assistant");

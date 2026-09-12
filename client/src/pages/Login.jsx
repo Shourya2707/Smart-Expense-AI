@@ -54,14 +54,17 @@ const Login = () => {
     }
   };
 
+  const DEMO_EMAIL = "demo@smartexpense.app";
+  const DEMO_PASSWORD = "Demo@12345";
+
   const handleDemoLogin = async () => {
-    setForm({ email: "demo@smartexpense.ai", password: "Password123!" });
+    setForm({ email: DEMO_EMAIL, password: DEMO_PASSWORD });
     setLoading(true);
     setError("");
     try {
       const { data } = await API.post("/api/auth/login", {
-        email: "demo@smartexpense.ai",
-        password: "Password123!",
+        email: DEMO_EMAIL,
+        password: DEMO_PASSWORD,
       });
       if (data.success && data.token) {
         login(data.token, data.user);
@@ -69,8 +72,29 @@ const Login = () => {
         navigate(from, { replace: true });
       }
     } catch {
-      // If demo account doesn't exist, fill credentials so user can submit or register
-      toast.info("Demo credentials populated in fields");
+      // Demo account missing (fresh database) — create it, then sign in.
+      try {
+        const reg = await API.post("/api/auth/register", {
+          fullName: "Demo User",
+          email: DEMO_EMAIL,
+          password: DEMO_PASSWORD,
+        });
+        if (reg.data.success && reg.data.token) {
+          login(reg.data.token, reg.data.user);
+          toast.success("Demo account created and signed in");
+          navigate(from, { replace: true });
+          return;
+        }
+      } catch (regError) {
+        if (regError.response?.status === 400 && /already registered/i.test(regError.response?.data?.message || "")) {
+          // Exists but the first login failed — surface the real error.
+        } else {
+          toast.error(regError.response?.data?.message || "Could not create the demo account.");
+          setLoading(false);
+          return;
+        }
+      }
+      toast.error("Demo sign-in failed. Run `npm run seed` in server/ to restore it.");
       setLoading(false);
     }
   };

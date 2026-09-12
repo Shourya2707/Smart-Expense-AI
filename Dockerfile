@@ -14,5 +14,6 @@ COPY server/ ./server/
 COPY --from=client-build /app/client/dist ./client/dist
 RUN mkdir -p /app/server/data
 ENV DATA_DIR=/app/server/data
+ENV PORT=5000
 EXPOSE 5000
 CMD ["node", "server/server.js"]

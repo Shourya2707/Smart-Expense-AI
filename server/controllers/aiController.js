@@ -36,27 +36,36 @@ exports.chat = async (req, res) => {
   res.flushHeaders?.();
 
   let closed = false;
-  req.on("close", () => { closed = true; });
+  // res "close" fires on both normal completion and premature client disconnect;
+  // req "close" can fire as soon as the JSON body is consumed.
+  res.on("close", () => { closed = !res.writableEnded; });
 
   try {
     send({ type: "start" });
     const history = await ChatMessage.recentForContext(req.user._id, sessionId);
     let answer = "";
+    let streamedAny = false;
     const finalAnswer = await runAgent({
       userId: req.user._id,
       userMessage: message,
       history,
       onEvent: (event) => {
         if (closed) return;
-        if (event.type === "token") answer += event.text;
+        if (event.type === "token") { answer += event.text; streamedAny = true; }
         send(event);
       },
     });
     const text = finalAnswer || answer || "I couldn't generate a reply. Please try again.";
+    // Fallback mode returns the full answer without streaming tokens.
+    if (!streamedAny && !closed) send({ type: "token", text });
 
     ChatMessage.append(req.user._id, "user", message, sessionId);
     const saved = ChatMessage.append(req.user._id, "assistant", text, sessionId);
-    send({ type: "done", messageId: saved._id });
+    if (!closed) {
+      // Authoritative final text — the client replaces whatever it streamed with this.
+      send({ type: "answer", text });
+      send({ type: "done", messageId: saved._id });
+    }
   } catch (error) {
     console.error("Chat error:", error.message);
     if (!closed) send({ type: "error", message: "The assistant hit an error. Please try again." });
@@ -92,29 +101,58 @@ exports.getInsights = async (req, res) => {
 /** POST /api/ai/scan-receipt — vision model reads merchant/amount/date/category. */
 exports.scanReceipt = async (req, res) => {
   if (!req.file) return res.status(400).json({ success: false, message: "Choose a receipt image first." });
-  if (!env.groqApiKey) return res.status(503).json({ success: false, message: "Receipt AI needs GROQ_API_KEY in the server environment." });
+
+  // Vision provider preference: NVIDIA NIM (has real free vision models) → Groq (if a vision model returns to its catalog).
+  const useNvidia = Boolean(env.nvidiaApiKey && env.nvidiaVisionModel);
+  const useGroq = Boolean(env.groqApiKey && env.groqVisionModel);
+  if (!useNvidia && !useGroq) {
+    return res.status(503).json({
+      success: false,
+      message: "No vision provider is configured. Set NVIDIA_API_KEY in server/.env (free credits at build.nvidia.com), or add the expense manually.",
+    });
+  }
 
   const started = Date.now();
+  const prompt = `Read this receipt and return JSON only with merchant, amount (number, the grand total paid), date (YYYY-MM-DD), category (one of ${CATEGORIES.join(", ")}), description (short), and items (array of {name, price}). Use null for unreadable fields.`;
+  const imagePart = { type: "image_url", image_url: { url: `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}` } };
+
   try {
-    const groq = new Groq({ apiKey: env.groqApiKey });
-    const content = [
-      {
-        type: "text",
-        text: `Read this receipt and return JSON only with merchant, amount, date (YYYY-MM-DD), category (one of ${CATEGORIES.join(", ")}), description, and items (array of {name, price}). Use null when unreadable.`,
-      },
-      { type: "image_url", image_url: { url: `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}` } },
-    ];
-    const response = await groq.chat.completions.create({
-      model: env.groqVisionModel,
-      temperature: 0,
-      max_tokens: 600,
-      response_format: { type: "json_object" },
-      messages: [{ role: "user", content }],
-    });
-    const usage = response.usage || {};
+    let content;
+    let usage = {};
+
+    if (useNvidia) {
+      // NVIDIA NIM is OpenAI-compatible; plain fetch keeps it dependency-free.
+      const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${env.nvidiaApiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: env.nvidiaVisionModel,
+          temperature: 0,
+          max_tokens: 1024,
+          messages: [{ role: "user", content: [{ type: "text", text: prompt }, imagePart] }],
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(`NVIDIA ${response.status}: ${body?.error?.message || JSON.stringify(body).slice(0, 200)}`);
+      }
+      content = body.choices?.[0]?.message?.content || "";
+      usage = body.usage || {};
+    } else {
+      const groq = new Groq({ apiKey: env.groqApiKey });
+      const response = await groq.chat.completions.create({
+        model: env.groqVisionModel,
+        temperature: 0,
+        max_tokens: 600,
+        response_format: { type: "json_object" },
+        messages: [{ role: "user", content: [{ type: "text", text: prompt }, imagePart] }],
+      });
+      content = response.choices?.[0]?.message?.content || "";
+      usage = response.usage || {};
+    }
     logAiEvent(req, { feature: "receipt", latencyMs: Date.now() - started, usage, success: true });
 
-    const raw = extractJSON(response.choices[0]?.message?.content || "{}");
+    const raw = extractJSON(content || "{}");
     const amount = Number(raw?.amount);
     const category = CATEGORIES.find((item) => item.toLowerCase() === String(raw?.category).toLowerCase()) || "Others";
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -135,7 +173,16 @@ exports.scanReceipt = async (req, res) => {
   } catch (error) {
     logAiEvent(req, { feature: "receipt", latencyMs: Date.now() - started, success: false, error: error.message });
     console.error("Receipt scan error:", error.message);
-    res.status(502).json({ success: false, message: "Groq could not read this receipt. Try a sharper, well-lit image." });
+    const modelMissing = /model_not_found|does not exist/i.test(error.message);
+    const creditExhausted = /402|403|quota|credit|unauthorized/i.test(error.message);
+    res.status(modelMissing || creditExhausted ? 503 : 502).json({
+      success: false,
+      message: modelMissing
+        ? `The configured vision model is unavailable. Update NVIDIA_VISION_MODEL in server/.env — model catalog: https://build.nvidia.com/models`
+        : creditExhausted
+          ? "The vision provider rejected the request (quota/credits). NVIDIA free trial credits may be exhausted — see build.nvidia.com, or add the expense manually."
+          : "The vision model could not read this receipt. Try a sharper, well-lit image.",
+    });
   }
 };
 

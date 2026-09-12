@@ -26,3 +26,9 @@ pnpm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# SQLite database (local data)
+server/data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

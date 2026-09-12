@@ -51,6 +51,7 @@ async function runAgent({ userId, userMessage, history = [], onEvent }) {
   const started = Date.now();
   let promptTokens = 0;
   let completionTokens = 0;
+  let mutatingToolRan = false; // if we fail after a write, fallback must not re-write
 
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
@@ -87,6 +88,7 @@ async function runAgent({ userId, userMessage, history = [], onEvent }) {
         } catch (error) {
           result = { ok: false, error: error.message };
         }
+        if (["add_expense", "add_income"].includes(call.name)) mutatingToolRan = true;
         onEvent?.({ type: "tool", name: call.name, args: call.args, result });
         AiEvent.insert({
           userId,
@@ -104,7 +106,7 @@ async function runAgent({ userId, userMessage, history = [], onEvent }) {
   } catch (error) {
     console.warn("Agent error, falling back:", error.message);
     AiEvent.insert({ userId, feature: "chat", model: env.groqTextModel, promptTokens, completionTokens, totalTokens: promptTokens + completionTokens, latencyMs: Date.now() - started, success: false, error: error.message });
-    return runFallback({ userId, userMessage, onEvent });
+    return runFallback({ userId, userMessage, onEvent, skipAdds: mutatingToolRan });
   }
 }
 

@@ -8,8 +8,14 @@ const env = {
   clientUrl: process.env.CLIENT_URL || "",
   jwtSecret: process.env.JWT_SECRET || "",
   groqApiKey: process.env.GROQ_API_KEY || "",
-  groqTextModel: process.env.GROQ_TEXT_MODEL || "llama-3.1-8b-instant",
-  groqVisionModel: process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct",
+  // NOTE: Groq retires model IDs periodically. If the agent errors with
+  // model_not_found, list available models with:
+  //   curl https://api.groq.com/openai/v1/models -H "Authorization: Bearer $GROQ_API_KEY"
+  groqTextModel: process.env.GROQ_TEXT_MODEL || "qwen/qwen3.8-27b",
+  groqVisionModel: process.env.GROQ_VISION_MODEL || "",
+  // NVIDIA NIM — receipt vision (Groq's catalog has no vision models).
+  nvidiaApiKey: process.env.NVIDIA_API_KEY || "",
+  nvidiaVisionModel: process.env.NVIDIA_VISION_MODEL || "meta/llama-3.2-11b-vision-instruct",
   dataDir: process.env.DATA_DIR || path.join(__dirname, "..", "data"),
   adminEmails: (process.env.ADMIN_EMAILS || "")
     .split(",")

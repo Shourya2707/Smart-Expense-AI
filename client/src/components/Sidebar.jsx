@@ -1,6 +1,6 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard, Receipt, Wallet, LineChart, ScanLine, User, LogOut, X, Zap, Shield,
+  LayoutDashboard, Receipt, Wallet, Target, LineChart, ScanLine, User, LogOut, X, Zap, Shield,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
@@ -9,6 +9,7 @@ const NAV = [
   { path: "/dashboard",       label: "Dashboard",        Icon: LayoutDashboard },
   { path: "/expenses",        label: "Expenses",         Icon: Receipt },
   { path: "/income",          label: "Income",           Icon: Wallet },
+  { path: "/budgets",         label: "Budgets",          Icon: Target },
   { path: "/analytics",       label: "Analytics",        Icon: LineChart },
   { path: "/receipt-scanner", label: "Receipt Scanner",  Icon: ScanLine },
   { path: "/profile",         label: "Profile",          Icon: User },

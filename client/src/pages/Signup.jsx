@@ -45,15 +45,15 @@ const Signup = () => {
     setStep(1);
   };
 
-  // Password strength checks
-  const hasMinLen = form.password.length >= 6;
+  // Password strength checks (server requires 8+ characters)
+  const hasMinLen = form.password.length >= 8;
   const hasNumber = /\d/.test(form.password);
   const isMatch = form.password && form.password === form.confirmPassword;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!hasMinLen) {
-      setError("Password must be at least 6 characters long.");
+      setError("Password must be at least 8 characters long.");
       return;
     }
     if (form.password !== form.confirmPassword) {
@@ -220,7 +220,7 @@ const Signup = () => {
                   autoFocus
                   className="input"
                   style={{ paddingLeft: "38px", paddingRight: "38px" }}
-                  placeholder="At least 6 characters"
+                  placeholder="At least 8 characters"
                   value={form.password}
                   onChange={handleChange}
                 />
@@ -274,7 +274,7 @@ const Signup = () => {
               <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "7px", fontSize: "12px", color: hasMinLen ? "var(--fin-green)" : "var(--ink-4)" }}>
                   <Check size={13} style={{ strokeWidth: hasMinLen ? 3 : 2 }} />
-                  <span>At least 6 characters</span>
+                  <span>At least 8 characters</span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "7px", fontSize: "12px", color: hasNumber ? "var(--fin-green)" : "var(--ink-4)" }}>
                   <Check size={13} style={{ strokeWidth: hasNumber ? 3 : 2 }} />
