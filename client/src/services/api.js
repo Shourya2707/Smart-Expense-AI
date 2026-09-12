@@ -1,7 +1,9 @@
 import axios from "axios";
 
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+
 const API = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || "",
+  baseURL: apiBaseUrl,
   timeout: 20000,
   headers: { "Content-Type": "application/json" },
 });
@@ -40,7 +42,7 @@ API.interceptors.response.use(
  */
 export const streamChat = ({ message, sessionId = "default", signal, onEvent }) =>
   new Promise((resolve, reject) => {
-    fetch("/api/ai/chat", {
+    fetch(`${apiBaseUrl}/api/ai/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token")}` },
       body: JSON.stringify({ message, sessionId }),

@@ -14,6 +14,7 @@ ENV NODE_ENV=production
 # prerequisites during dependency installation.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 make g++ \
+    && python3 --version \
     && rm -rf /var/lib/apt/lists/*
 ENV PYTHON=/usr/bin/python3 \
     npm_config_python=/usr/bin/python3

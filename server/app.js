@@ -9,12 +9,18 @@ const { requestTelemetry } = require("./middleware/telemetryMiddleware");
 const app = express();
 
 // --------------- Middleware ---------------
-// Production: only the configured origin may call the API with credentials.
-// Development (no CLIENT_URL): reflect the requesting origin so Vite HMR works.
+// Production: only configured origins may call the API with credentials.
+// Development: reflect the requesting origin so Vite HMR works.
 app.use(cors({
-  origin: env.isProd
-    ? (env.clientUrl ? env.clientUrl.split(",").map((s) => s.trim()) : false)
-    : (env.clientUrl ? env.clientUrl.split(",").map((s) => s.trim()) : true),
+  origin: (requestOrigin, callback) => {
+    if (!requestOrigin || !env.isProd || env.allowedOrigins.includes(requestOrigin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS origin denied: ${requestOrigin}`));
+  },
+  methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 204,
   credentials: true,
 }));
 app.use(express.json({ limit: "10mb" }));
