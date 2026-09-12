@@ -8,6 +8,16 @@ RUN npm run build
 FROM node:24-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
+
+# better-sqlite3 may compile from source when a matching prebuilt binary is
+# unavailable. Keep the runtime image slim while providing node-gyp's build
+# prerequisites during dependency installation.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+ENV PYTHON=/usr/bin/python3 \
+    npm_config_python=/usr/bin/python3
+
 COPY server/package*.json ./server/
 RUN cd server && npm ci --omit=dev
 COPY server/ ./server/
