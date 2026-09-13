@@ -23,7 +23,11 @@ const publicUser = (user) => ({
 const cookieOptions = () => ({
   httpOnly: true,
   secure: env.isProd,
-  sameSite: "lax",
+  // The production frontend (Vercel) and API (Render) are different sites.
+  // Lax cookies are not sent with cross-site fetch/XHR requests, so the
+  // session would be created during login and immediately appear missing on
+  // the next /api/auth/me request.
+  sameSite: env.isProd ? "none" : "lax",
   maxAge: env.sessionTtlSeconds * 1000,
   path: "/api",
 });
