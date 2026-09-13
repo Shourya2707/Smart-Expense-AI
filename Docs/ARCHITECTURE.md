@@ -1,7 +1,24 @@
 # Architecture
 
 ## Data flow
-Client (React 19/Vite, port 5173) → Axios + SSE → Express 5 API (port 5001) → better-sqlite3 (WAL).
+Client (React 19/Vite, port 5173) → Axios/SSE with credentials → Express 5 API (port 5001) → better-sqlite3 (WAL).
+
+## Authentication and sessions
+
+Email/password and Google OAuth authenticate into opaque sessions. Only a
+cryptographically random session token is sent to the browser, in an HttpOnly
+SameSite=Lax cookie. SQLite stores its SHA-256 hash, expiry, last-use time, and
+revocation time. The auth middleware checks the database on every protected
+request, so logout and password changes invalidate sessions immediately.
+
+Google authorization uses a signed, short-lived state cookie and PKCE. Google
+ID tokens are validated for issuer, audience, subject, and verified email. A
+Google email that matches an existing local account is not silently linked;
+the user must first sign in and use the explicit Profile linking flow.
+
+Password reset tokens are random, single-use, hashed in SQLite, and only
+created when `PASSWORD_RESET_WEBHOOK_URL` is configured. The public request
+response is intentionally identical for existing and unknown email addresses.
 
 All financial math lives in `server/services/analyticsService.js` — the REST
 controller, AI tools, and seed verification all call the same functions, so

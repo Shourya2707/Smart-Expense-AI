@@ -15,6 +15,26 @@ const SCHEMA = `
     full_name TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
     password TEXT NOT NULL,
+    auth_provider TEXT NOT NULL DEFAULT 'local',
+    google_id TEXT,
+    avatar_url TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash TEXT NOT NULL UNIQUE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    revoked_at TEXT,
+    last_used_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash TEXT NOT NULL UNIQUE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
   CREATE TABLE IF NOT EXISTS expenses (
@@ -78,16 +98,23 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS chat_user_session ON chat_messages(user_id, session_id, id);
   CREATE INDEX IF NOT EXISTS ai_events_created ON ai_events(created_at DESC);
   CREATE INDEX IF NOT EXISTS request_log_created ON request_log(created_at DESC);
+  CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id, expires_at);
+  CREATE INDEX IF NOT EXISTS reset_tokens_user ON password_reset_tokens(user_id, expires_at);
 `;
 
 const connectDB = async () => {
   db.exec(SCHEMA);
+  const columns = new Set(db.prepare("PRAGMA table_info(users)").all().map((column) => column.name));
+  if (!columns.has("auth_provider")) db.exec("ALTER TABLE users ADD COLUMN auth_provider TEXT NOT NULL DEFAULT 'local'");
+  if (!columns.has("google_id")) db.exec("ALTER TABLE users ADD COLUMN google_id TEXT");
+  if (!columns.has("avatar_url")) db.exec("ALTER TABLE users ADD COLUMN avatar_url TEXT");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_google_id ON users(google_id) WHERE google_id IS NOT NULL");
   console.log(`SQLite ready: ${path.join(env.dataDir, "smartexpense.sqlite")}`);
 };
 
 // Row → API object mappers. `user` keeps the hash (auth needs it); `safeUser` is for req.user/responses.
-const user = (row) => row && { _id: row.id, id: row.id, fullName: row.full_name, email: row.email, password: row.password, createdAt: row.created_at };
-const safeUser = (row) => row && { _id: row.id, id: row.id, fullName: row.full_name, email: row.email, createdAt: row.created_at };
+const user = (row) => row && { _id: row.id, id: row.id, fullName: row.full_name, email: row.email, password: row.password, authProvider: row.auth_provider, googleId: row.google_id, avatarUrl: row.avatar_url, createdAt: row.created_at };
+const safeUser = (row) => row && { _id: row.id, id: row.id, fullName: row.full_name, email: row.email, authProvider: row.auth_provider, avatarUrl: row.avatar_url, createdAt: row.created_at };
 const expense = (row) => row && { _id: row.id, id: row.id, userId: row.user_id, amount: row.amount, category: row.category, description: row.description, date: row.date, createdAt: row.created_at };
 const income = (row) => row && { _id: row.id, id: row.id, userId: row.user_id, amount: row.amount, source: row.source, date: row.date, createdAt: row.created_at };
 const chatMessage = (row) => row && { _id: row.id, id: row.id, role: row.role, content: row.content, createdAt: row.created_at };

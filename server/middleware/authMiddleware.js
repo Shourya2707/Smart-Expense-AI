@@ -1,25 +1,25 @@
-const jwt = require("jsonwebtoken");
-const User = require("../models/User");
+const Session = require("../models/Session");
 const { env } = require("../config/env");
 
 const isAdminEmail = (email) => env.adminEmails.includes(String(email || "").toLowerCase());
 
+const getSessionFromRequest = async (req) => {
+  const token = req.cookies?.[Session.COOKIE_NAME];
+  if (!token) return null;
+  return Session.findByToken(token);
+};
+
 const protect = async (req, res, next) => {
-  if (!req.headers.authorization?.startsWith("Bearer")) {
-    return res.status(401).json({ success: false, message: "Not authorized, no token" });
-  }
   try {
-    const token = req.headers.authorization.split(" ")[1];
-    const decoded = jwt.verify(token, env.jwtSecret);
-    // safeUser: no password hash on req.user.
-    const user = await User.findSafeById(decoded.id);
-    if (!user) return res.status(401).json({ success: false, message: "User not found" });
-    req.user = user;
-    req.isAdmin = isAdminEmail(user.email);
+    const session = await getSessionFromRequest(req);
+    if (!session) return res.status(401).json({ success: false, message: "Not authorized, session expired or missing" });
+    req.session = session;
+    req.user = session.user;
+    req.isAdmin = isAdminEmail(session.user.email);
     next();
   } catch (error) {
-    console.error(error);
-    return res.status(401).json({ success: false, message: "Not authorized, token failed" });
+    console.error("Session authentication failed:", error.message);
+    return res.status(401).json({ success: false, message: "Not authorized" });
   }
 };
 
@@ -28,4 +28,4 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
-module.exports = { protect, requireAdmin, isAdminEmail };
+module.exports = { protect, requireAdmin, isAdminEmail, getSessionFromRequest };

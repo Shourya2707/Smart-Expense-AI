@@ -7,6 +7,11 @@ const { getInsights } = require("../services/ai/insights");
 const { CATEGORIES } = require("../services/analyticsService");
 
 function extractJSON(text) {
+  if (typeof text !== "string") {
+    text = Array.isArray(text)
+      ? text.filter((part) => typeof part === "string").join("\n")
+      : String(text || "");
+  }
   try {
     return JSON.parse(text.replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim());
   } catch {
@@ -117,40 +122,63 @@ exports.scanReceipt = async (req, res) => {
   const imagePart = { type: "image_url", image_url: { url: `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}` } };
 
   try {
-    let content;
+    let content = "";
     let usage = {};
+    let provider = "";
+    let lastError;
 
-    if (useNvidia) {
-      // NVIDIA NIM is OpenAI-compatible; plain fetch keeps it dependency-free.
-      const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${env.nvidiaApiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: env.nvidiaVisionModel,
+    // Try the configured providers in order. A stale/temporarily unavailable
+    // NVIDIA model should not make receipt scanning fail when Groq is ready.
+    const providers = [
+      useNvidia && { name: "NVIDIA", run: async () => {
+        const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${env.nvidiaApiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: env.nvidiaVisionModel,
+            temperature: 0,
+            max_tokens: 1024,
+            messages: [{ role: "user", content: [{ type: "text", text: prompt }, imagePart] }],
+          }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(`NVIDIA ${response.status}: ${body?.error?.message || JSON.stringify(body).slice(0, 200)}`);
+        }
+        return { content: body.choices?.[0]?.message?.content || "", usage: body.usage || {} };
+      } },
+      useGroq && { name: "Groq", run: async () => {
+        const groq = new Groq({ apiKey: env.groqApiKey });
+        const response = await groq.chat.completions.create({
+          model: env.groqVisionModel,
           temperature: 0,
-          max_tokens: 1024,
+          max_tokens: 600,
+          response_format: { type: "json_object" },
           messages: [{ role: "user", content: [{ type: "text", text: prompt }, imagePart] }],
-        }),
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(`NVIDIA ${response.status}: ${body?.error?.message || JSON.stringify(body).slice(0, 200)}`);
+        });
+        return { content: response.choices?.[0]?.message?.content || "", usage: response.usage || {} };
+      } },
+    ].filter(Boolean);
+
+    for (const candidate of providers) {
+      try {
+        const result = await candidate.run();
+        const parsed = extractJSON(result.content || "{}");
+        if (!Number.isFinite(Number(parsed?.amount)) || Number(parsed.amount) <= 0) {
+          throw new Error(`${candidate.name} returned an unreadable receipt response.`);
+        }
+        ({ content, usage } = result);
+        provider = candidate.name;
+        break;
+      } catch (error) {
+        lastError = error;
+        console.warn(`Receipt scan ${candidate.name} provider failed:`, error.message);
       }
-      content = body.choices?.[0]?.message?.content || "";
-      usage = body.usage || {};
-    } else {
-      const groq = new Groq({ apiKey: env.groqApiKey });
-      const response = await groq.chat.completions.create({
-        model: env.groqVisionModel,
-        temperature: 0,
-        max_tokens: 600,
-        response_format: { type: "json_object" },
-        messages: [{ role: "user", content: [{ type: "text", text: prompt }, imagePart] }],
-      });
-      content = response.choices?.[0]?.message?.content || "";
-      usage = response.usage || {};
     }
-    logAiEvent(req, { feature: "receipt", latencyMs: Date.now() - started, usage, success: true });
+    if (!provider) throw lastError || new Error("No vision provider completed the request.");
+
+    const model = provider === "NVIDIA" ? env.nvidiaVisionModel : env.groqVisionModel;
+    logAiEvent(req, { feature: "receipt", model, latencyMs: Date.now() - started, usage, success: true });
 
     const raw = extractJSON(content || "{}");
     const amount = Number(raw?.amount);
@@ -171,7 +199,7 @@ exports.scanReceipt = async (req, res) => {
       message: "Receipt parsed. Review the fields before saving.",
     });
   } catch (error) {
-    logAiEvent(req, { feature: "receipt", latencyMs: Date.now() - started, success: false, error: error.message });
+    logAiEvent(req, { feature: "receipt", model: useNvidia ? env.nvidiaVisionModel : env.groqVisionModel, latencyMs: Date.now() - started, success: false, error: error.message });
     console.error("Receipt scan error:", error.message);
     const modelMissing = /model_not_found|does not exist/i.test(error.message);
     const creditExhausted = /402|403|quota|credit|unauthorized/i.test(error.message);
@@ -186,12 +214,12 @@ exports.scanReceipt = async (req, res) => {
   }
 };
 
-function logAiEvent(req, { feature, latencyMs, usage = {}, success, error = null }) {
+function logAiEvent(req, { feature, model = null, latencyMs, usage = {}, success, error = null }) {
   try {
     AiEvent.insert({
       userId: req.user?._id ?? null,
       feature,
-      model: env.groqVisionModel,
+      model: model || env.groqVisionModel || env.nvidiaVisionModel,
       promptTokens: usage.prompt_tokens ?? null,
       completionTokens: usage.completion_tokens ?? null,
       totalTokens: usage.total_tokens ?? null,

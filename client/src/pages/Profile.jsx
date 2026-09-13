@@ -11,7 +11,7 @@ import {
   Mail,
   Calendar,
 } from "lucide-react";
-import API from "../services/api";
+import API, { googleLinkUrl } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { formatDate } from "../utils/formatters";
@@ -310,6 +310,22 @@ const Profile = () => {
                   </button>
                 </div>
               </form>
+
+              <div style={{ padding: "14px", background: "var(--bg-subtle)", borderRadius: "var(--r-sm)", border: "1px solid var(--border)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px" }}>
+                  <div>
+                    <span className="section-label">Google account</span>
+                    <p style={{ fontSize: "12.5px", color: "var(--ink-2)", marginTop: "5px" }}>
+                      {user?.authProvider === "google" ? "Google is linked to this account." : "Link Google after signing in to avoid accidental account takeover."}
+                    </p>
+                  </div>
+                  {user?.authProvider !== "google" && (
+                    <a href={googleLinkUrl} className="btn btn-secondary" style={{ whiteSpace: "nowrap", textDecoration: "none" }}>
+                      Connect Google
+                    </a>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
@@ -427,7 +443,7 @@ const Profile = () => {
               <div style={{ padding: "14px", background: "var(--bg-subtle)", borderRadius: "var(--r-sm)", border: "1px solid var(--border)" }}>
                 <span className="section-label">Security Protocol</span>
                 <p style={{ fontSize: "12.5px", color: "var(--ink-2)", marginTop: "6px" }}>
-                  All ledger mutations are cryptographically mapped to your Bearer JWT token session. Data remains private and strictly isolated.
+                  All ledger mutations use a revocable, server-side session. The browser only receives an HttpOnly cookie; authentication tokens are never exposed to JavaScript.
                 </p>
               </div>
             </div>

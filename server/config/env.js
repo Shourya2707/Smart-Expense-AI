@@ -1,19 +1,28 @@
 const path = require("path");
 require("dotenv").config();
 
-const normalizeOrigin = (value) => value.trim().replace(/\/$/, "");
+const normalizeOrigin = (value) => String(value || "").trim().replace(/\/$/, "");
 const configuredOrigins = (process.env.CLIENT_URL || process.env.CORS_ORIGINS || "")
   .split(",")
   .map(normalizeOrigin)
   .filter(Boolean);
 
+const isProd = process.env.NODE_ENV === "production";
+
 const env = {
   nodeEnv: process.env.NODE_ENV || "development",
-  isProd: process.env.NODE_ENV === "production",
+  isProd,
   port: Number(process.env.PORT) || 5001,
   clientUrl: configuredOrigins.join(","),
   allowedOrigins: configuredOrigins,
-  jwtSecret: process.env.JWT_SECRET || "",
+  // Development gets a local-only default so a fresh clone can run. Production
+  // must provide a real secret through the deployment environment.
+  sessionSecret: process.env.SESSION_SECRET || (!isProd ? "local-development-session-secret-change-me" : ""),
+  sessionTtlSeconds: Number(process.env.SESSION_TTL_SECONDS) || 60 * 60 * 24 * 7,
+  googleClientId: process.env.GOOGLE_CLIENT_ID || "",
+  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
+  googleCallbackUrl: process.env.GOOGLE_CALLBACK_URL || "",
+  passwordResetWebhookUrl: process.env.PASSWORD_RESET_WEBHOOK_URL || "",
   groqApiKey: process.env.GROQ_API_KEY || "",
   // NOTE: Groq retires model IDs periodically. If the agent errors with
   // model_not_found, list available models with:
@@ -31,14 +40,17 @@ const env = {
 };
 
 function validate() {
-  if (!env.jwtSecret) {
-    throw new Error("JWT_SECRET is required. Set it in server/.env (see .env.example).");
+  if (env.isProd && !env.sessionSecret) {
+    throw new Error("SESSION_SECRET is required in production. Set it in Render.");
   }
   if (env.isProd && !env.allowedOrigins.length) {
     console.warn("[env] CLIENT_URL is not set in production — CORS will reject cross-origin browser requests.");
   }
   if (!env.groqApiKey) {
     console.warn("[env] GROQ_API_KEY is not set — AI features run in deterministic fallback mode (no LLM calls).");
+  }
+  if (env.isProd && (!env.googleClientId || !env.googleClientSecret || !env.googleCallbackUrl)) {
+    console.warn("[env] Google OAuth is disabled until GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_CALLBACK_URL are configured.");
   }
 }
 

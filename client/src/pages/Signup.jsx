@@ -71,8 +71,8 @@ const Signup = () => {
         password: form.password,
       });
 
-      if (data.success && data.token) {
-        login(data.token, data.user);
+      if (data.success && data.user) {
+        login(data.user);
         toast.success("Account created successfully! Welcome to SmartExpense AI.");
         navigate("/dashboard", { replace: true });
       } else {

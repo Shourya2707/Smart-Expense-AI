@@ -14,6 +14,7 @@ const BASE_URL = process.env.SMOKE_BASE_URL || "http://localhost:5001";
 
 let total = 0;
 let failures = 0;
+let sessionCookie = "";
 
 function check(label, cond, detail = "") {
   total += 1;
@@ -34,13 +35,18 @@ const preview = (res) => {
 async function request(method, path, { body, token } = {}) {
   const headers = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  if (token) headers.Authorization = `Bearer ${token}`;
+  if (sessionCookie) headers.Cookie = sessionCookie;
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
+  const setCookies = res.headers.getSetCookie?.() || [];
+  for (const value of setCookies) {
+    const pair = value.split(";", 1)[0];
+    if (pair.startsWith("se_session=")) sessionCookie = pair.endsWith("=") ? "" : pair;
+  }
   let json = null;
   try { json = text ? JSON.parse(text) : null; } catch { /* non-JSON body */ }
   return { status: res.status, json, text };
@@ -62,7 +68,7 @@ async function chatSse(message, token) {
       headers: {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
-        Authorization: `Bearer ${token}`,
+        ...(sessionCookie ? { Cookie: sessionCookie } : {}),
       },
       body: JSON.stringify({ message }),
       signal: ac.signal,
@@ -115,8 +121,8 @@ async function main() {
     const reg = await request("POST", "/api/auth/register", {
       body: { fullName: "Smoke Test", email, password: "Smoke@12345" },
     });
-    check("Register returns 201 with token + user.id", reg.status === 201 && Boolean(reg.json?.token) && Boolean(reg.json?.user?.id), preview(reg));
-    token = reg.json?.token || null;
+    check("Register returns 201 with session cookie + user.id", reg.status === 201 && Boolean(sessionCookie) && Boolean(reg.json?.user?.id), preview(reg));
+    token = sessionCookie || null;
 
     if (token) {
       const me = await request("GET", "/api/auth/me", { token });
@@ -284,8 +290,13 @@ async function main() {
   // ---- 10-11. Guards --------------------------------------------------------------------
   console.log("\n— Guards —");
   try {
+    const loggedOut = await request("POST", "/api/auth/logout", { token });
+    check("POST /api/auth/logout revokes session", loggedOut.status === 200 && !sessionCookie, preview(loggedOut));
     const noToken = await request("GET", "/api/expenses");
     check("GET /api/expenses with no token → 401", noToken.status === 401, preview(noToken));
+    const relogin = await request("POST", "/api/auth/login", { body: { email, password: "Smoke@12345" } });
+    token = sessionCookie || null;
+    check("Re-login creates a fresh session", relogin.status === 200 && Boolean(token), preview(relogin));
   } catch (error) {
     check("Auth guard", false, error.message);
   }

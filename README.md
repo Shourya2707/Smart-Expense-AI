@@ -13,7 +13,7 @@ An AI-powered expense tracking and personal finance app with a LangChain agent t
 - **🧾 Receipt Scanner** — Groq vision model (`llama-4-scout`) extracts merchant, amount, date, and category from receipt photos for confirmation before saving.
 - **📊 Verified Analytics** — totals, category breakdown, monthly inflow/outflow, and net trajectory computed with timezone-safe date handling, with an independent verification script (`npm run verify`).
 - **📈 Observability for admins** — per-day request traffic, p95 latency, AI token usage, per-tool success rates, and recent errors at `/admin` (users listed in `ADMIN_EMAILS`).
-- **🔐 Auth** — JWT (7-day) + bcrypt, per-user data isolation, strict input validation, no fallback secrets in production.
+- **🔐 Auth** — bcrypt passwords plus revocable, hashed server sessions in HttpOnly cookies; Google OAuth uses state, PKCE, and verified ID tokens.
 - **💾 Zero-infra persistence** — SQLite (WAL mode) at `DATA_DIR`; mount a volume in production and you're done.
 - **🎞️ Fluid UI** — spring-physics chat panel (framer-motion), staggered messages, tool-trace chips, typing dots, pulsing mic — consistent with the existing slate/glassmorphism design system.
 
@@ -40,7 +40,7 @@ SmartExpense-AI/
 │   ├── controllers/ routes/ middleware/
 │   ├── scripts/                 # seed.js, verify-analytics.js
 │   └── data/                    # smartexpense.sqlite (gitignored)
-├── Dockerfile                   # Railway/any-container deploy
+├── Dockerfile                   # Render/any-container deploy
 └── README.md
 ```
 
@@ -50,7 +50,9 @@ Copy `server/.env.example` → `server/.env` and `client/.env.example` → `clie
 
 | Variable (server) | Required | Purpose |
 |---|---|---|
-| `JWT_SECRET` | ✅ | Token signing — server refuses to boot without it |
+| `SESSION_SECRET` | ✅ in production | Session-cookie signing and OAuth state protection |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth only | Google OAuth application credentials |
+| `GOOGLE_CALLBACK_URL` | OAuth only | Exact registered Google callback URL |
 | `GROQ_API_KEY` | for AI | Free key from [console.groq.com](https://console.groq.com/keys). Without it the assistant runs in deterministic offline mode |
 | `GROQ_TEXT_MODEL` / `GROQ_VISION_MODEL` | — | Model overrides (defaults: `llama-3.1-8b-instant`, `llama-4-scout`) |
 | `ADMIN_EMAILS` | — | Comma-separated emails that can access `/admin` |
@@ -76,8 +78,11 @@ npm run verify    # independently re-checks every analytics metric ✅
 
 | Method | Endpoint | Access | Description |
 |---|---|---|---|
-| POST | `/api/auth/register` · `/api/auth/login` | Public | JWT auth |
+| POST | `/api/auth/register` · `/api/auth/login` · `/api/auth/logout` | Public | Cookie-backed session auth |
 | GET | `/api/auth/me` · PUT `/api/auth/profile` | Private | Profile |
+| GET | `/api/auth/google` · `/api/auth/google/callback` | Public | Google OAuth authorization-code + PKCE |
+| GET | `/api/auth/google/link` | Private | Link verified Google email to the signed-in account |
+| POST | `/api/auth/forgot-password` · `/api/auth/reset-password` | Public | Provider-backed password reset |
 | GET/POST | `/api/expenses` | Private | List / create |
 | PUT/DELETE | `/api/expenses/:id` | Private | Update / delete |
 | GET/POST | `/api/income` | Private | List / create |
@@ -89,13 +94,13 @@ npm run verify    # independently re-checks every analytics metric ✅
 | POST | `/api/ai/scan-receipt` | Private | Vision extraction (multipart `receipt`) |
 | GET | `/api/admin/overview` · `/series` · `/tools` · `/errors` | Admin | Observability |
 
-## 🌐 Deployment (Railway free tier)
+## 🌐 Deployment (Render)
 
 The included `Dockerfile` builds the client and serves it from Express in one process — a single free-tier service, no managed DB needed.
 
-1. Deploy the repo; set variables: `JWT_SECRET`, `GROQ_API_KEY`, `CLIENT_URL=https://<your-app>.up.railway.app`, `ADMIN_EMAILS=<your email>`, and `NODE_ENV=production`.
-2. Attach a Railway Volume at `/app/server/data` if demo/persisted data must survive redeploys.
-3. (Optional) Seed demo data once via `railway run npm run seed` or a one-off shell.
+1. Deploy the repo as a web service with the Dockerfile; set `NODE_ENV=production`, a strong `SESSION_SECRET`, `CLIENT_URL=https://<your-render-domain>`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL=https://<your-render-domain>/api/auth/google/callback`, `GROQ_API_KEY`, and `ADMIN_EMAILS`.
+2. Attach a Render persistent disk mounted at `/app/server/data` so SQLite survives restarts and redeploys.
+3. Register the exact callback URL in Google Cloud Console. Password reset delivery remains disabled until `PASSWORD_RESET_WEBHOOK_URL` points at a trusted email provider.
 
 ### How the AI stays free
 - **LLM**: Groq free tier (rate-limited but generous; the agent caps tool loops at 5 and truncates context to the last 12 messages to conserve tokens).

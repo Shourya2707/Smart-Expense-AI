@@ -8,6 +8,7 @@ import DashboardLayout from "./layouts/DashboardLayout";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
+import PasswordReset from "./pages/PasswordReset";
 import Dashboard from "./pages/Dashboard";
 import Expenses from "./pages/Expenses";
 import Income from "./pages/Income";
@@ -37,6 +38,8 @@ function AppRoutes() {
       <Route path="/" element={<Home />} />
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
+      <Route path="/forgot-password" element={<PasswordReset />} />
+      <Route path="/reset-password" element={<PasswordReset />} />
 
       {/* Authenticated routes */}
       <Route

@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const cookieParser = require("cookie-parser");
 const path = require("path");
 const fs = require("fs");
 const { env } = require("./config/env"); // loads + validates dotenv on first require
@@ -19,12 +20,13 @@ app.use(cors({
     return callback(new Error(`CORS origin denied: ${requestOrigin}`));
   },
   methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type"],
   optionsSuccessStatus: 204,
   credentials: true,
 }));
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser(env.sessionSecret));
 app.use(requestTelemetry);
 app.use("/api", (req, res, next) => {
   res.set("Cache-Control", "no-store");
@@ -44,7 +46,7 @@ app.use("/api/analytics", require("./routes/analyticsRoutes"));
 app.use("/api/ai", require("./routes/aiRoutes"));
 app.use("/api/admin", require("./routes/adminRoutes"));
 
-// Railway can serve the built Vite app from the same process.
+// Render can serve the built Vite app from the same process.
 const clientDist = path.join(__dirname, "..", "client", "dist");
 if (fs.existsSync(clientDist)) {
   app.use(express.static(clientDist));

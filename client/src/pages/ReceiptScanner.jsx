@@ -91,7 +91,9 @@ const ReceiptScanner = () => {
 
     try {
       const { data } = await API.post("/api/ai/scan-receipt", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
+        // Vision inference can take longer than ordinary API calls. Let the
+        // browser set the multipart boundary and give the model enough time.
+        timeout: 90000,
       });
 
       if (data.success && data.data) {

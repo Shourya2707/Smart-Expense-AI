@@ -32,3 +32,6 @@ server/data/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+
+# Local execution plan / deployment notes
+Docs/AUTH-SECURITY-OAUTH-PLAN.md

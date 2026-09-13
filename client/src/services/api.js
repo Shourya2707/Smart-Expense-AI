@@ -6,27 +6,18 @@ const API = axios.create({
   baseURL: apiBaseUrl,
   timeout: 20000,
   headers: { "Content-Type": "application/json" },
+  withCredentials: true,
 });
 
-/** Attach JWT from localStorage on every request */
-API.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem("token");
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  },
-  (err) => Promise.reject(err)
-);
-
-/** On 401, clear session and redirect to login */
+// On 401, return the user to login. Authentication itself lives in the
+// HttpOnly session cookie and is never copied into JavaScript storage.
 API.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
       const path = window.location.pathname;
-      if (!path.includes("/login") && !path.includes("/signup")) {
+      const requestUrl = err.config?.url || "";
+      if (!requestUrl.includes("/api/auth/me") && !path.includes("/login") && !path.includes("/signup")) {
         window.location.href = "/login";
       }
     }
@@ -36,17 +27,17 @@ API.interceptors.response.use(
 
 /**
  * Streaming chat with the AI assistant (SSE). Server events:
- *   {type:"start"} | {type:"token",text} | {type:"tool",name,args,result}
- *   | {type:"done",messageId} | {type:"error",message}
- * onEvent is called for each parsed event; resolves with the full text.
+ * {type:"start"} | {type:"token",text} | {type:"tool",name,args,result}
+ * | {type:"done",messageId} | {type:"error",message}
  */
 export const streamChat = ({ message, sessionId = "default", signal, onEvent }) =>
   new Promise((resolve, reject) => {
     fetch(`${apiBaseUrl}/api/ai/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token")}` },
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify({ message, sessionId }),
       signal,
+      credentials: "include",
     }).then(async (response) => {
       if (!response.ok) {
         let messageText = `Request failed (${response.status})`;
@@ -54,11 +45,7 @@ export const streamChat = ({ message, sessionId = "default", signal, onEvent }) 
           const body = await response.json();
           messageText = body.message || messageText;
         } catch { /* not JSON */ }
-        if (response.status === 401) {
-          localStorage.removeItem("token");
-          localStorage.removeItem("user");
-          window.location.href = "/login";
-        }
+        if (response.status === 401) window.location.href = "/login";
         reject(new Error(messageText));
         return;
       }
@@ -95,5 +82,8 @@ export const fetchChatHistory = (sessionId = "default") =>
 
 export const resetChat = (sessionId = "default") =>
   API.post("/api/ai/chat/reset", { sessionId });
+
+export const googleAuthUrl = `${apiBaseUrl}/api/auth/google`;
+export const googleLinkUrl = `${apiBaseUrl}/api/auth/google/link`;
 
 export default API;

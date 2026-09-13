@@ -8,6 +8,7 @@
     "dev": "nodemon server.js",
     "seed": "node scripts/seed.js",
     "verify": "node scripts/verify-analytics.js",
+    "test:auth": "node scripts/auth-security-test.js",
     "smoke": "node scripts/api-smoke.js"
   },
   "keywords": [
@@ -24,11 +25,12 @@
     "@langchain/groq": "^1.0.0",
     "bcrypt": "^6.0.0",
     "better-sqlite3": "^13.0.3",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "google-auth-library": "^11.0.2",
     "groq-sdk": "^1.6.0",
-    "jsonwebtoken": "^9.0.3",
     "langchain": "^1.0.2",
     "multer": "^2.2.0",
     "zod": "^4.1.11"
